@@ -57,7 +57,7 @@ Output:
 
 ## Hybrid Retrieval
 
-Hermes Agent should combine:
+TraceVault should combine:
 
 | Retrieval Type | Best For |
 |---|---|

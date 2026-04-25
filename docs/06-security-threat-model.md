@@ -2,7 +2,7 @@
 
 ## Security Objective
 
-Hermes Agent handles enterprise knowledge. Therefore, the system must treat source integrity, access control, prompt injection, and data leakage as primary design concerns.
+TraceVault handles enterprise knowledge. Therefore, the system must treat source integrity, access control, prompt injection, and data leakage as primary design concerns.
 
 ## Assets to Protect
 
@@ -89,7 +89,7 @@ Mitigation:
 
 ## Secure Answering Policy
 
-Hermes Agent should refuse or limit answers when:
+TraceVault should refuse or limit answers when:
 
 - evidence is missing
 - source is marked restricted

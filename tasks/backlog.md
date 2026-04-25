@@ -1,4 +1,4 @@
-# Hermes Agent Backlog
+# TraceVault Backlog
 
 ## Phase 0 - Documentation Foundation
 

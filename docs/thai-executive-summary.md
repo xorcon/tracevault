@@ -1,8 +1,8 @@
-# Hermes Agent - Executive Summary ภาษาไทย
+# TraceVault - Executive Summary ภาษาไทย
 
 ## Positioning
 
-Hermes Agent คือโปรเจค flagship สำหรับดันภาพลักษณ์ไปสู่:
+TraceVault คือโปรเจค flagship สำหรับดันภาพลักษณ์ไปสู่:
 
 **Hybrid Cloud & AI Platform Architect with enterprise-grade knowledge governance and grounded AI system design**
 
@@ -50,11 +50,11 @@ Hermes Agent คือโปรเจค flagship สำหรับดันภ
 
 ## คำอธิบายสำหรับ Resume
 
-ออกแบบ Hermes Agent ซึ่งเป็นระบบ Enterprise Knowledge Reasoning ที่รวม semantic pre-processing, dual-context storage, hybrid retrieval และ grounded LLM reasoning เพื่อให้ AI สามารถตอบคำถามจากฐานความรู้แบบตรวจสอบย้อนกลับได้ โดยเก็บทั้งข้อความต้นฉบับและข้อความที่ปรับความหมายแล้ว เพื่อเพิ่มความแม่นยำ ความน่าเชื่อถือ และ governance ในการใช้งานระดับองค์กร
+ออกแบบ TraceVault ซึ่งเป็นระบบ Enterprise Knowledge Reasoning ที่รวม semantic pre-processing, dual-context storage, hybrid retrieval และ grounded LLM reasoning เพื่อให้ AI สามารถตอบคำถามจากฐานความรู้แบบตรวจสอบย้อนกลับได้ โดยเก็บทั้งข้อความต้นฉบับและข้อความที่ปรับความหมายแล้ว เพื่อเพิ่มความแม่นยำ ความน่าเชื่อถือ และ governance ในการใช้งานระดับองค์กร
 
 ## คำอธิบายสั้นสำหรับ LinkedIn
 
-Hermes Agent is a traceable enterprise knowledge reasoning system designed to combine grounded RAG, hybrid retrieval, source governance, and AI platform architecture for audit-ready enterprise AI workflows.
+TraceVault is a traceable enterprise knowledge reasoning system designed to combine grounded RAG, hybrid retrieval, source governance, and AI platform architecture for audit-ready enterprise AI workflows.
 
 ## เป้าหมาย MVP
 
@@ -70,4 +70,4 @@ Hermes Agent is a traceable enterprise knowledge reasoning system designed to co
 
 ## Strategic Verdict
 
-นี่คือโปรเจคที่ควรทำต่อจาก Lotto Intelligence เพราะ Lotto แสดง production discipline และ data-driven application แล้ว ส่วน Hermes Agent จะเติม AI Platform Architecture, RAG, vector retrieval, governance, security และ grounded reasoning เข้าไป ทำให้ portfolio ขยับจาก application delivery ไปสู่ enterprise AI architecture อย่างชัดเจน
+นี่คือโปรเจคที่ควรทำต่อจาก Lotto Intelligence เพราะ Lotto แสดง production discipline และ data-driven application แล้ว ส่วน TraceVault จะเติม AI Platform Architecture, RAG, vector retrieval, governance, security และ grounded reasoning เข้าไป ทำให้ portfolio ขยับจาก application delivery ไปสู่ enterprise AI architecture อย่างชัดเจน

@@ -2,7 +2,7 @@
 
 ## Governance Objective
 
-Hermes Agent must be able to answer this question for every output:
+TraceVault must be able to answer this question for every output:
 
 > Which exact source evidence caused the system to generate this answer?
 

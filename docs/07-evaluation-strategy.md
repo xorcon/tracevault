@@ -2,7 +2,7 @@
 
 ## Evaluation Objective
 
-Hermes Agent must be evaluated as an enterprise knowledge reasoning system, not only as a chatbot.
+TraceVault must be evaluated as an enterprise knowledge reasoning system, not only as a chatbot.
 
 The evaluation must measure:
 

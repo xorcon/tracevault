@@ -1,5 +1,5 @@
 {
-  "name": "hermes-agent",
+  "name": "tracevault",
   "version": "0.1.0",
   "private": true,
   "description": "Traceable enterprise knowledge reasoning system demonstrating grounded RAG, hybrid retrieval, source governance, and AI platform architecture.",

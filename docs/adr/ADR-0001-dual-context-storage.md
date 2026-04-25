@@ -10,7 +10,7 @@ Enterprise AI systems need both high-quality semantic retrieval and strong audit
 
 ## Decision
 
-Hermes Agent will store both:
+TraceVault will store both:
 
 - `raw_text`: original source evidence
 - `cleaned_text`: normalized semantic version for retrieval and reasoning

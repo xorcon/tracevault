@@ -2,7 +2,7 @@
 
 ## Security Scope
 
-Hermes Agent is designed for enterprise knowledge reasoning. Security issues may include:
+TraceVault is designed for enterprise knowledge reasoning. Security issues may include:
 
 - prompt injection vulnerabilities
 - source data leakage

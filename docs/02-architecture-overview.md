@@ -2,7 +2,7 @@
 
 ## Architecture Style
 
-Hermes Agent follows a modular AI platform architecture:
+TraceVault follows a modular AI platform architecture:
 
 - ingestion-first
 - evidence-preserving
@@ -118,7 +118,7 @@ Vector search is strong for conceptual similarity, but enterprise search often d
 - regulation references
 - architecture decisions
 
-Hermes Agent uses both vector retrieval and BM25 keyword retrieval to improve coverage.
+TraceVault uses both vector retrieval and BM25 keyword retrieval to improve coverage.
 
 ## Architecture Quality Attributes
 

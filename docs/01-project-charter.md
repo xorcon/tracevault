@@ -2,7 +2,7 @@
 
 ## Project Name
 
-Hermes Agent
+TraceVault
 
 ## Full Strategic Title
 
@@ -14,7 +14,7 @@ Build a traceable enterprise knowledge reasoning system that can ingest noisy in
 
 ## Why This Project Exists
 
-Hermes Agent is not a generic chatbot. It is designed to solve a real enterprise AI problem: organizations need AI systems that can reason over internal knowledge without losing auditability, data lineage, or source-of-truth discipline.
+TraceVault is not a generic chatbot. It is designed to solve a real enterprise AI problem: organizations need AI systems that can reason over internal knowledge without losing auditability, data lineage, or source-of-truth discipline.
 
 The system demonstrates the architecture patterns required for enterprise AI adoption:
 

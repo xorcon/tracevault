@@ -2,7 +2,7 @@
 
 ## Deployment Objective
 
-Hermes Agent should be designed for hybrid deployment from the beginning. The same architecture should support:
+TraceVault should be designed for hybrid deployment from the beginning. The same architecture should support:
 
 - local lab deployment
 - single-node demo deployment
@@ -134,4 +134,4 @@ Initial GitHub Actions should check:
 
 ## Hybrid Cloud Portfolio Message
 
-This deployment architecture demonstrates that Hermes Agent is not just an AI app. It is a platform blueprint that can run across local, cloud, and private enterprise environments.
+This deployment architecture demonstrates that TraceVault is not just an AI app. It is a platform blueprint that can run across local, cloud, and private enterprise environments.

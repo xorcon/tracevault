@@ -1,8 +1,8 @@
-# Hermes Agent
+# TraceVault
 
 **Traceable Enterprise Knowledge Reasoning System for Hybrid Cloud & AI Platform Architecture**
 
-Hermes Agent is a portfolio-grade AI platform project designed to demonstrate enterprise-ready RAG architecture, knowledge governance, evidence traceability, hybrid retrieval, and grounded reasoning.
+TraceVault is a portfolio-grade AI platform project designed to demonstrate enterprise-ready RAG architecture, knowledge governance, evidence traceability, hybrid retrieval, and grounded reasoning.
 
 The project is intentionally positioned for architecture-level credibility, not as a basic chatbot demo.
 
@@ -12,7 +12,7 @@ The project is intentionally positioned for architecture-level credibility, not 
 
 > Hybrid Cloud & AI Platform Architect with enterprise-grade knowledge governance and grounded AI system design.
 
-Hermes Agent is designed to prove capability in:
+TraceVault is designed to prove capability in:
 
 - AI platform architecture
 - RAG pipeline design
@@ -34,7 +34,7 @@ Enterprise knowledge is often scattered across notes, documents, incident record
 - no governance over raw vs normalized knowledge
 - insufficient separation between semantic reasoning and audit evidence
 
-Hermes Agent addresses this by preserving original knowledge while creating retrieval-optimized semantic representations.
+TraceVault addresses this by preserving original knowledge while creating retrieval-optimized semantic representations.
 
 ## System Concept
 
@@ -115,7 +115,7 @@ The initial MVP focuses on a traceable grounded RAG pipeline:
 Recommended repository name:
 
 ```text
-hermes-agent
+tracevault
 ```
 
 Recommended GitHub description:
@@ -135,7 +135,7 @@ rag, ai-platform, hybrid-cloud, knowledge-governance, vector-search, bm25, groun
 Using GitHub CLI:
 
 ```bash
-gh repo create xorcon/hermes-agent --public --description "Traceable enterprise knowledge reasoning system demonstrating grounded RAG, hybrid retrieval, source governance, and AI platform architecture." --clone=false
+gh repo create xorcon/tracevault --public --description "Traceable enterprise knowledge reasoning system demonstrating grounded RAG, hybrid retrieval, source governance, and AI platform architecture." --clone=false
 ```
 
 Then push this package:
@@ -143,9 +143,9 @@ Then push this package:
 ```bash
 git init
 git add .
-git commit -m "docs: initialize Hermes Agent architecture repository"
+git commit -m "docs: initialize TraceVault architecture repository"
 git branch -M main
-git remote add origin https://github.com/xorcon/hermes-agent.git
+git remote add origin https://github.com/xorcon/tracevault.git
 git push -u origin main
 ```
 

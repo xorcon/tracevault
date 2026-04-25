@@ -2,7 +2,7 @@
 
 ## Project Title
 
-Hermes Agent - Traceable Enterprise Knowledge Reasoning System
+TraceVault - Traceable Enterprise Knowledge Reasoning System
 
 ## One-Line Summary
 
@@ -10,7 +10,7 @@ Designed a grounded AI knowledge reasoning platform that combines semantic pre-p
 
 ## Executive Summary
 
-Hermes Agent is an enterprise AI platform architecture project focused on making AI answers verifiable, explainable, and auditable. The system preserves raw source evidence while creating cleaned semantic chunks for retrieval and reasoning. It combines vector search, keyword search, metadata filtering, and verification logic to reduce hallucination risk and improve trust in enterprise AI workflows.
+TraceVault is an enterprise AI platform architecture project focused on making AI answers verifiable, explainable, and auditable. The system preserves raw source evidence while creating cleaned semantic chunks for retrieval and reasoning. It combines vector search, keyword search, metadata filtering, and verification logic to reduce hallucination risk and improve trust in enterprise AI workflows.
 
 ## Business Problem
 
@@ -27,7 +27,7 @@ Organizations need AI systems that can:
 
 ## Architecture Response
 
-Hermes Agent uses a governed RAG architecture:
+TraceVault uses a governed RAG architecture:
 
 1. raw document ingestion
 2. semantic chunk normalization
@@ -78,11 +78,11 @@ It demonstrates that the architect can connect:
 
 ## Resume Bullet
 
-Designed Hermes Agent, a traceable enterprise knowledge reasoning system using semantic pre-processing, dual-context storage, hybrid retrieval, and grounded LLM reasoning to enable citation-backed AI answers, source auditability, and enterprise knowledge governance.
+Designed TraceVault, a traceable enterprise knowledge reasoning system using semantic pre-processing, dual-context storage, hybrid retrieval, and grounded LLM reasoning to enable citation-backed AI answers, source auditability, and enterprise knowledge governance.
 
 ## LinkedIn Project Description
 
-Hermes Agent is my enterprise AI platform architecture project focused on grounded knowledge reasoning. It is designed to preserve raw source evidence while using semantic refinement, vector search, keyword search, metadata filtering, and verification controls to produce traceable AI answers suitable for enterprise decision support.
+TraceVault is my enterprise AI platform architecture project focused on grounded knowledge reasoning. It is designed to preserve raw source evidence while using semantic refinement, vector search, keyword search, metadata filtering, and verification controls to produce traceable AI answers suitable for enterprise decision support.
 
 ## Interview Talking Points
 

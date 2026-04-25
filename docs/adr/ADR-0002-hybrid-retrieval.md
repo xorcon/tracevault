@@ -10,7 +10,7 @@ Vector search is strong for semantic matching but can miss exact terms. Enterpri
 
 ## Decision
 
-Hermes Agent will use hybrid retrieval:
+TraceVault will use hybrid retrieval:
 
 - vector search over cleaned text
 - keyword/BM25 search over raw and cleaned text

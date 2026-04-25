@@ -10,7 +10,7 @@ LLM answers can be fluent but unsupported. Enterprise users need evidence-backed
 
 ## Decision
 
-Hermes Agent will include a verification layer to check:
+TraceVault will include a verification layer to check:
 
 - citation support
 - unsupported claims
