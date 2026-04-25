@@ -1,12 +1,64 @@
+# Dependencies
 node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Build outputs
 dist/
 build/
+.next/
+out/
+coverage/
+
+# Environment variables and secrets
 .env
 .env.*
 !.env.example
-.DS_Store
-coverage/
+
+# Keys and certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+service-account*.json
+credentials*.json
+
+# Local runtime data
+data/
+storage/
+uploads/
+documents/
+corpus/
+indexes/
+vector_store/
+vector-db/
+chroma/
+qdrant_storage/
+lancedb/
+.tmp/
+.cache/
+
+# Logs
 *.log
+logs/
+
+# Local database files
+*.sqlite
+*.sqlite3
+*.db
+
+# Editor / OS
+.DS_Store
 .vscode/
 .idea/
-.tmp/
+
+# Test / generated reports
+reports/
+evaluation-runs/
