@@ -31,14 +31,14 @@ service-account*.json
 credentials*.json
 
 # Local runtime data
-data/
-storage/
+/data/
+/storage/
 uploads/
-documents/
+/documents/
 corpus/
-indexes/
-vector_store/
-vector-db/
+/indexes/
+/vector_store/
+/vector-db/
 chroma/
 qdrant_storage/
 lancedb/
@@ -70,3 +70,7 @@ settings.local.json
 skill_create_plan.md
 plans/open-questions.md
 
+
+# Python packaging artifacts
+*.egg-info/
+.eggs/
