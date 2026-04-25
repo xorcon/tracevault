@@ -62,3 +62,11 @@ logs/
 # Test / generated reports
 reports/
 evaluation-runs/
+
+# These files are for local AI tooling only and should not be committed.
+AGENTS.md
+CLAUDE.md
+settings.local.json
+skill_create_plan.md
+plans/open-questions.md
+
