@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hermes Evidence Pack",
+  "type": "object",
+  "required": [
+    "query",
+    "reasoning_mode",
+    "evidence"
+  ],
+  "properties": {
+    "query": {
+      "type": "string"
+    },
+    "reasoning_mode": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "document_id",
+          "raw_text",
+          "cleaned_text",
+          "score",
+          "retrieval_source"
+        ],
+        "properties": {
+          "chunk_id": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "raw_text": {
+            "type": "string"
+          },
+          "cleaned_text": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "retrieval_source": {
+            "type": "string",
+            "enum": [
+              "vector",
+              "keyword",
+              "hybrid"
+            ]
+          },
+          "metadata": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

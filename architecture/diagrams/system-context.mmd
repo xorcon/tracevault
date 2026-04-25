@@ -1,0 +1,19 @@
+flowchart TD
+    U[User] --> UI[Hermes Web/API Interface]
+    UI --> RET[Hybrid Retriever]
+    RET --> VEC[Vector Index]
+    RET --> KW[Keyword/BM25 Index]
+    RET --> META[Metadata Filter]
+    RET --> EV[Evidence Builder]
+    EV --> LLM[Grounded Reasoning Model]
+    LLM --> VER[Verification Layer]
+    VER --> ANS[Answer + Evidence Trace]
+    ANS --> U
+
+    SRC[Source Documents] --> ING[Ingestion Service]
+    ING --> CH[Chunking Engine]
+    CH --> REF[Semantic Refinement]
+    REF --> STORE[Dual Context Store]
+    STORE --> VEC
+    STORE --> KW
+    STORE --> META

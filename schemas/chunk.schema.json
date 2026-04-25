@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hermes Knowledge Chunk",
+  "type": "object",
+  "required": [
+    "chunk_id",
+    "document_id",
+    "chunk_index",
+    "raw_text",
+    "cleaned_text",
+    "metadata",
+    "proof"
+  ],
+  "properties": {
+    "chunk_id": {
+      "type": "string"
+    },
+    "document_id": {
+      "type": "string"
+    },
+    "chunk_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "raw_text": {
+      "type": "string"
+    },
+    "cleaned_text": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "source_type": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "document_date": {
+          "type": "string"
+        },
+        "imported_at": {
+          "type": "string"
+        },
+        "topic_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sensitivity": {
+          "type": "string",
+          "enum": [
+            "public",
+            "internal",
+            "restricted",
+            "confidential"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "proof": {
+      "type": "object",
+      "required": [
+        "raw_hash",
+        "cleaned_hash",
+        "refinement_model",
+        "refinement_prompt_version"
+      ],
+      "properties": {
+        "raw_hash": {
+          "type": "string"
+        },
+        "cleaned_hash": {
+          "type": "string"
+        },
+        "refinement_model": {
+          "type": "string"
+        },
+        "refinement_prompt_version": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

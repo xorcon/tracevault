@@ -1,0 +1,24 @@
+{
+  "name": "hermes-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Traceable enterprise knowledge reasoning system demonstrating grounded RAG, hybrid retrieval, source governance, and AI platform architecture.",
+  "scripts": {
+    "docs:check": "echo 'Documentation baseline ready'",
+    "test": "echo 'No tests yet. Add evaluation tests in Phase 1.'"
+  },
+  "keywords": [
+    "rag",
+    "ai-platform",
+    "hybrid-cloud",
+    "knowledge-governance",
+    "vector-search",
+    "bm25",
+    "grounded-ai",
+    "enterprise-architecture",
+    "llmops",
+    "ai-security"
+  ],
+  "author": "Natthakit Thussanaphan",
+  "license": "MIT"
+}

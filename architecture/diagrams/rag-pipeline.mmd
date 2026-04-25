@@ -1,0 +1,18 @@
+flowchart LR
+    A[Raw Document] --> B[Chunk]
+    B --> C[Semantic Refinement]
+    C --> D[Store raw_text]
+    C --> E[Store cleaned_text]
+    E --> F[Embedding]
+    F --> G[Vector Index]
+    D --> H[Keyword Index]
+    E --> H
+    Q[User Query] --> I[Query Analyzer]
+    I --> G
+    I --> H
+    G --> J[Merge + Rerank]
+    H --> J
+    J --> K[Evidence Pack]
+    K --> L[Grounded Reasoning]
+    L --> M[Verification]
+    M --> N[Answer with Citations]

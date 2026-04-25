@@ -1,0 +1,20 @@
+name: Docs Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check repository structure
+        run: |
+          test -f README.md
+          test -f docs/01-project-charter.md
+          test -f docs/02-architecture-overview.md
+          test -f docs/06-security-threat-model.md
+          test -f docs/07-evaluation-strategy.md
+          echo "Documentation baseline exists."
