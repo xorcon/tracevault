@@ -3,8 +3,8 @@
 Defines structured types for documents, ingestion results, and manifests.
 """
 
+import hashlib
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Literal
 
 DocumentStatus = Literal["new", "unchanged", "changed", "skipped", "error"]
@@ -15,7 +15,7 @@ class DocumentRecord:
     """Record of an ingested document.
 
     Attributes:
-        document_id: Stable identifier (path-based with hash suffix).
+        document_id: Stable identifier derived from source path hash and content hash.
         source_path: Normalized relative path to source file.
         content_hash: SHA-256 hash of raw content.
         size_bytes: File size in bytes.
@@ -34,13 +34,23 @@ class DocumentRecord:
 
     @staticmethod
     def generate_document_id(source_path: str, content_hash: str) -> str:
-        """Generate stable document ID from path and hash.
+        """Generate collision-resistant document ID from canonical path and content.
 
-        Format: path-without-extension-hash[:8]
+        Format: doc_<path_hash_12>_<content_hash_12>
+
+        - path_hash: SHA-256 of canonical source path (first 12 hex chars)
+        - content_hash: SHA-256 of raw content (first 12 hex chars)
+
+        Guarantees:
+        - Same path + same content = same document_id
+        - Same path + different content = different document_id
+        - Different paths + same content = different document_id
+        - No collisions between files with same basename in different directories
         """
-        path = Path(source_path)
-        name = path.stem.replace("/", "_").replace("\\", "_")
-        return f"{name[:50]}_{content_hash[:16]}"
+        # Hash the canonical source path to avoid collisions from same-named files
+        path_hash = hashlib.sha256(source_path.encode("utf-8")).hexdigest()[:12]
+        content_prefix = content_hash[:12]
+        return f"doc_{path_hash}_{content_prefix}"
 
 
 @dataclass

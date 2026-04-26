@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
-from tracevault.ingestion.manifest import IngestManifest
+import pytest
+
+from tracevault.ingestion.manifest import IngestManifest, ManifestCorruptionError
 
 
 class TestManifest:
@@ -141,11 +143,13 @@ class TestManifest:
         manifest.clear()
         assert len(manifest.get_all_entries()) == 0
 
-    def test_corrupted_manifest_recovery(self, tmp_path):
-        """Handles corrupted manifest gracefully."""
+    def test_corrupted_manifest_raises_error(self, tmp_path):
+        """Corrupted manifest raises ManifestCorruptionError."""
+
         manifest_path = tmp_path / "manifest.json"
         manifest_path.write_text("not valid json", encoding="utf-8")
 
-        # Should not crash, start with empty entries
-        manifest = IngestManifest(manifest_path)
-        assert len(manifest.get_all_entries()) == 0
+        # Should raise ManifestCorruptionError, not silently reset
+        with pytest.raises(ManifestCorruptionError) as exc_info:
+            IngestManifest(manifest_path)
+        assert "Invalid JSON" in str(exc_info.value)

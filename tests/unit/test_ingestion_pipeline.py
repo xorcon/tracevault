@@ -169,7 +169,7 @@ class TestPipeline:
             ingest_path(missing)
 
     def test_document_id_generation(self, tmp_path):
-        """Document IDs are deterministic."""
+        """Document IDs are deterministic with collision-resistant format."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello", encoding="utf-8")
 
@@ -179,9 +179,15 @@ class TestPipeline:
         result = ingest_file(test_file, manifest)
         doc_id = result.document_record.document_id
 
-        # ID should contain path info and hash
-        assert "test" in doc_id
-        assert len(doc_id) > 0
+        # Format: doc_<path_hash_12>_<content_hash_12>
+        assert doc_id.startswith("doc_")
+        parts = doc_id.split("_")
+        assert len(parts) == 3
+        assert len(parts[1]) == 12  # path hash
+        assert len(parts[2]) == 12  # content hash
+        # Determinism: same file produces same ID
+        result2 = ingest_file(test_file, manifest)
+        assert result2.document_record.document_id == doc_id
 
     def test_raw_text_preservation(self, tmp_path):
         """Raw text is preserved exactly (verified via hash)."""

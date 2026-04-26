@@ -170,8 +170,12 @@ def ingest_directory(
     for root, dirs, files in os.walk(directory_path):
         root_path = Path(root)
 
-        # Filter out ignored directories (modify in-place)
-        dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
+        # Filter out ignored directories and hidden directories (modify in-place)
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in IGNORED_DIRS and not d.startswith(".")
+        ]
 
         for filename in files:
             file_path = root_path / filename

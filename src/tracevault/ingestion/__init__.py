@@ -17,7 +17,11 @@ from tracevault.ingestion.loader import (
     is_supported_file,
     load_file,
 )
-from tracevault.ingestion.manifest import DEFAULT_MANIFEST_PATH, IngestManifest
+from tracevault.ingestion.manifest import (
+    DEFAULT_MANIFEST_PATH,
+    IngestManifest,
+    ManifestCorruptionError,
+)
 from tracevault.ingestion.models import (
     DocumentRecord,
     DocumentStatus,
@@ -38,6 +42,8 @@ __all__ = [
     "IngestResult",
     "IngestSummary",
     "ManifestEntry",
+    # Exceptions
+    "ManifestCorruptionError",
     # Hashing
     "compute_content_hash",
     "compute_file_hash",

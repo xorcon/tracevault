@@ -12,6 +12,12 @@ from tracevault.ingestion.models import ManifestEntry
 DEFAULT_MANIFEST_PATH = ".tracevault/ingest-manifest.json"
 
 
+class ManifestCorruptionError(Exception):
+    """Raised when manifest file is corrupted or unreadable."""
+
+    pass
+
+
 class IngestManifest:
     """Manages the ingestion manifest.
 
@@ -26,23 +32,43 @@ class IngestManifest:
 
         Args:
             manifest_path: Path to manifest JSON file.
+
+        Raises:
+            ManifestCorruptionError: If manifest exists but is invalid JSON.
         """
         self.manifest_path = Path(manifest_path)
         self._entries: dict[str, ManifestEntry] = {}
         self._load()
 
     def _load(self) -> None:
-        """Load manifest from disk."""
+        """Load manifest from disk.
+
+        Raises:
+            ManifestCorruptionError: If manifest file exists but contains invalid JSON
+            or missing required fields.
+        """
         if self.manifest_path.exists():
             try:
-                data = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+                content = self.manifest_path.read_text(encoding="utf-8")
+                data = json.loads(content)
+                entries = data.get("entries", [])
+                if not isinstance(entries, list):
+                    raise ManifestCorruptionError(
+                        f"Manifest entries must be a list, got {type(entries).__name__}"
+                    )
+                # Normalize paths as keys to ensure canonical storage
                 self._entries = {
-                    entry["source_path"]: ManifestEntry(**entry)
-                    for entry in data.get("entries", [])
+                    self.normalize_path(entry["source_path"]): ManifestEntry(**entry)
+                    for entry in entries
                 }
-            except (json.JSONDecodeError, KeyError):
-                # Corrupted manifest - start fresh
-                self._entries = {}
+            except json.JSONDecodeError as e:
+                raise ManifestCorruptionError(
+                    f"Invalid JSON in manifest: {e}"
+                ) from e
+            except KeyError as e:
+                raise ManifestCorruptionError(
+                    f"Missing required field in manifest entry: {e}"
+                ) from e
 
     def save(self) -> None:
         """Save manifest to disk."""
@@ -60,12 +86,13 @@ class IngestManifest:
         """Get manifest entry for source path.
 
         Args:
-            source_path: Normalized source path.
+            source_path: Source path (will be normalized).
 
         Returns:
             ManifestEntry if exists, None otherwise.
         """
-        return self._entries.get(source_path)
+        normalized = self.normalize_path(source_path)
+        return self._entries.get(normalized)
 
     def update_entry(
         self,
@@ -78,7 +105,7 @@ class IngestManifest:
         """Update or create manifest entry.
 
         Args:
-            source_path: Normalized source path.
+            source_path: Source path (will be normalized).
             content_hash: SHA-256 hash of content.
             size_bytes: File size.
             modified_time: File modification time.
@@ -87,7 +114,9 @@ class IngestManifest:
         Returns:
             Status: 'new', 'unchanged', or 'changed'.
         """
-        existing = self._entries.get(source_path)
+        # Normalize path to ensure canonical keying
+        normalized_path = self.normalize_path(source_path)
+        existing = self._entries.get(normalized_path)
 
         if existing is None:
             status = "new"
@@ -96,8 +125,8 @@ class IngestManifest:
         else:
             status = "changed"
 
-        self._entries[source_path] = ManifestEntry(
-            source_path=source_path,
+        self._entries[normalized_path] = ManifestEntry(
+            source_path=normalized_path,
             content_hash=content_hash,
             size_bytes=size_bytes,
             modified_time=modified_time,
@@ -110,13 +139,14 @@ class IngestManifest:
         """Remove entry from manifest.
 
         Args:
-            source_path: Path to remove.
+            source_path: Path to remove (will be normalized).
 
         Returns:
             True if entry existed and was removed.
         """
-        if source_path in self._entries:
-            del self._entries[source_path]
+        normalized = self.normalize_path(source_path)
+        if normalized in self._entries:
+            del self._entries[normalized]
             return True
         return False
 
@@ -129,14 +159,27 @@ class IngestManifest:
         return list(self._entries.values())
 
     def normalize_path(self, path: Path | str) -> str:
-        """Normalize path for manifest storage.
+        """Normalize path for manifest storage using canonical resolution.
 
-        Converts to relative path with forward slashes.
+        Resolves symlinks and normalizes path separators to ensure equivalent
+        paths (e.g., docs/file.md vs sub/../docs/file.md) map to the same key.
+
+        Args:
+            path: Path to normalize.
+
+        Returns:
+            Canonical path string with forward slashes.
         """
         p = Path(path)
+        # Resolve to canonical absolute path (resolves symlinks, .., etc.)
+        try:
+            resolved = p.resolve()
+        except (OSError, ValueError):
+            # If resolution fails (e.g., non-existent path), normalize anyway
+            resolved = p
         # Make relative if possible, otherwise use absolute
         try:
-            rel_path = p.relative_to(Path.cwd())
+            rel_path = resolved.relative_to(Path.cwd().resolve())
         except ValueError:
-            rel_path = p
+            rel_path = resolved
         return str(rel_path).replace("\\", "/")

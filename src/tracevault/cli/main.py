@@ -13,6 +13,7 @@ from pathlib import Path
 
 from tracevault import __version__
 from tracevault.ingestion import DEFAULT_MANIFEST_PATH, ingest_path
+from tracevault.ingestion.manifest import ManifestCorruptionError
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -190,8 +191,19 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 if r.error:
                     print(f"Error: {r.error}")
 
-        return 0
+        # Exit 1 if any errors occurred
+        if hasattr(result, "error_count"):
+            return 1 if result.error_count > 0 else 0
+        return 1 if result.status == "error" else 0
 
+    except ManifestCorruptionError as e:
+        if args.json:
+            print(json.dumps({"error": f"Manifest corruption: {e}", "success": False}, indent=2))
+        else:
+            print(f"Error: Manifest corruption detected: {e}", file=sys.stderr)
+            print(f"Manifest path: {args.manifest_path}", file=sys.stderr)
+            print("Please fix or remove the corrupted manifest file.", file=sys.stderr)
+        return 1
     except Exception as e:
         if args.json:
             print(json.dumps({"error": str(e), "success": False}, indent=2))
