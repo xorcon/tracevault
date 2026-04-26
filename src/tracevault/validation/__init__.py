@@ -1,15 +1,16 @@
-"""Validation module.
+"""Validation module (implements architecture verification layer).
 
-Implements verification layer:
+This module implements the verification layer described in the TraceVault
+architecture documentation (ADR-0003). It provides:
 - Citation support checking
 - Unsupported claim detection
 - Confidence scoring
 - Raw vs cleaned conflict detection
 
-Phase 5 will implement the verification pipeline.
+Phase 5 will implement the full verification pipeline.
 """
 
-from typing import Protocol, runtime_checkable, TypedDict
+from typing import Protocol, TypedDict, runtime_checkable
 
 
 class ValidationResult(TypedDict):

@@ -23,7 +23,7 @@ def create_parser() -> argparse.ArgumentParser:
         ),
         epilog=(
             "\nArchitecture: https://github.com/xorcon/tracevault/tree/main/docs\n"
-            "Phase 1: Foundation (documentation-to-code setup)"
+            "Foundation milestone: documentation-to-code setup"
         ),
     )
 
@@ -69,16 +69,16 @@ def cmd_version(args: argparse.Namespace) -> int:
         print(__version__)
     else:
         print(f"TraceVault {__version__}")
-        print(f"  Description: Traceable Enterprise Knowledge Reasoning System")
-        print(f"  Phase: 1 (Foundation)")
+        print("  Description: Traceable Enterprise Knowledge Reasoning System")
+        print("  Milestone: Foundation (documentation-to-code)")
         print(f"  Python: {sys.version}")
     return 0
 
 
 def cmd_diagnose(args: argparse.Namespace) -> int:
     """Handle diagnose command."""
-    print(f"TraceVault Diagnostic Report")
-    print(f"=" * 40)
+    print("TraceVault Diagnostic Report")
+    print("=" * 40)
     print(f"Version: {__version__}")
     print(f"Python: {sys.version}")
     print(f"Executable: {sys.executable}")
@@ -95,11 +95,11 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         print(f"\nWarning: Missing directories: {missing}")
         return 1
 
-    print(f"\nPackage structure: OK")
+    print("\nPackage structure: OK")
     print(f"Required modules present: {', '.join(required_dirs)}")
 
     if args.verbose:
-        print(f"\nDetailed module check:")
+        print("\nDetailed module check:")
         for module in required_dirs:
             module_path = package_path / module
             init_file = module_path / "__init__.py"

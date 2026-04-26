@@ -9,7 +9,7 @@ Implements hybrid retrieval combining:
 Phase 4 will implement the full hybrid retrieval pipeline.
 """
 
-from typing import Protocol, runtime_checkable, TypedDict
+from typing import Protocol, TypedDict, runtime_checkable
 
 
 class EvidenceItem(TypedDict):

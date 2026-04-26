@@ -10,7 +10,7 @@ Reasoning modes:
 Phase 5 will implement the reasoning engine.
 """
 
-from typing import Protocol, runtime_checkable, TypedDict
+from typing import Protocol, TypedDict, runtime_checkable
 
 
 class ReasoningResult(TypedDict):
