@@ -7,10 +7,12 @@ Usage:
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from tracevault import __version__
+from tracevault.ingestion import DEFAULT_MANIFEST_PATH, ingest_path
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -58,6 +60,32 @@ def create_parser() -> argparse.ArgumentParser:
         "--verbose",
         action="store_true",
         help="Show detailed diagnostic information",
+    )
+
+    # Ingest command
+    ingest_parser = subparsers.add_parser(
+        "ingest",
+        help="Ingest documents",
+        description=(
+            "Ingest .txt, .md, or .markdown files into TraceVault. "
+            "Supports single files or directories."
+        ),
+    )
+    ingest_parser.add_argument(
+        "path",
+        type=str,
+        help="Path to file or directory to ingest",
+    )
+    ingest_parser.add_argument(
+        "--manifest-path",
+        type=str,
+        default=DEFAULT_MANIFEST_PATH,
+        help=f"Path to manifest file (default: {DEFAULT_MANIFEST_PATH})",
+    )
+    ingest_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
     )
 
     return parser
@@ -109,6 +137,69 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest(args: argparse.Namespace) -> int:
+    """Handle ingest command."""
+    path = Path(args.path)
+
+    if not path.exists():
+        if args.json:
+            output = {"error": f"Path not found: {args.path}", "success": False}
+            print(json.dumps(output, indent=2))
+        else:
+            print(f"Error: Path not found: {args.path}", file=sys.stderr)
+        return 1
+
+    try:
+        result = ingest_path(path, manifest_path=args.manifest_path)
+
+        if args.json:
+            if hasattr(result, "to_dict"):
+                print(json.dumps(result.to_dict(), indent=2))
+            else:
+                print(json.dumps({
+                    "source_path": result.source_path,
+                    "status": result.status,
+                    "document_id": result.document_record.document_id if result.document_record else None,
+                    "content_hash": result.document_record.content_hash if result.document_record else None,
+                    "error": result.error,
+                }, indent=2))
+        else:
+            # Human-readable output
+            if hasattr(result, "new_count"):  # Directory result
+                summary = result
+                print("Ingestion Summary:")
+                print(f"  Total files: {summary.total_files}")
+                print(f"  New: {summary.new_count}")
+                print(f"  Unchanged: {summary.unchanged_count}")
+                print(f"  Changed: {summary.changed_count}")
+                print(f"  Skipped: {summary.skipped_count}")
+                print(f"  Errors: {summary.error_count}")
+                if summary.error_count > 0:
+                    print("\nErrors:")
+                    for r in result.results:
+                        if r.status == "error":
+                            print(f"  - {r.source_path}: {r.error}")
+            else:  # Single file result
+                r = result
+                print(f"File: {r.source_path}")
+                print(f"Status: {r.status}")
+                if r.document_record:
+                    print(f"Document ID: {r.document_record.document_id}")
+                    print(f"Content Hash: {r.document_record.content_hash}")
+                    print(f"Size: {r.document_record.size_bytes} bytes")
+                if r.error:
+                    print(f"Error: {r.error}")
+
+        return 0
+
+    except Exception as e:
+        if args.json:
+            print(json.dumps({"error": str(e), "success": False}, indent=2))
+        else:
+            print(f"Error during ingestion: {e}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     """Main entry point."""
     parser = create_parser()
@@ -122,6 +213,8 @@ def main() -> int:
         return cmd_version(args)
     elif args.command == "diagnose":
         return cmd_diagnose(args)
+    elif args.command == "ingest":
+        return cmd_ingest(args)
     else:
         parser.print_help()
         return 1
