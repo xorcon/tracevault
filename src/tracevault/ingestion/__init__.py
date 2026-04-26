@@ -1,34 +1,63 @@
 """Ingestion module.
 
-Handles document loading, metadata extraction, and manifest creation.
-Phase 2 will implement differential ingest and hashing.
+Provides document ingestion with differential ingest detection.
+
+Components:
+- models: DocumentRecord, IngestResult, IngestSummary
+- hashing: SHA-256 content hashing
+- loader: UTF-8 file loading with raw preservation
+- manifest: JSON-based ingest state tracking
+- pipeline: File and directory ingestion
 """
 
-from typing import Protocol, runtime_checkable
+from tracevault.ingestion.hashing import compute_content_hash, compute_file_hash, verify_hash
+from tracevault.ingestion.loader import (
+    SUPPORTED_EXTENSIONS,
+    get_source_type,
+    is_supported_file,
+    load_file,
+)
+from tracevault.ingestion.manifest import (
+    DEFAULT_MANIFEST_PATH,
+    IngestManifest,
+    ManifestCorruptionError,
+)
+from tracevault.ingestion.models import (
+    DocumentRecord,
+    DocumentStatus,
+    IngestResult,
+    IngestSummary,
+    ManifestEntry,
+)
+from tracevault.ingestion.pipeline import (
+    ingest_directory,
+    ingest_file,
+    ingest_path,
+)
 
-
-@runtime_checkable
-class DocumentLoader(Protocol):
-    """Protocol for document loading."""
-
-    def load(self, source_path: str) -> str:
-        """Load document content.
-
-        Args:
-            source_path: Path to the document.
-
-        Returns:
-            Raw document content.
-        """
-        ...
-
-    def get_metadata(self, source_path: str) -> dict:
-        """Extract metadata from document.
-
-        Args:
-            source_path: Path to the document.
-
-        Returns:
-            Metadata dictionary.
-        """
-        ...
+__all__ = [
+    # Models
+    "DocumentRecord",
+    "DocumentStatus",
+    "IngestResult",
+    "IngestSummary",
+    "ManifestEntry",
+    # Exceptions
+    "ManifestCorruptionError",
+    # Hashing
+    "compute_content_hash",
+    "compute_file_hash",
+    "verify_hash",
+    # Loader
+    "SUPPORTED_EXTENSIONS",
+    "get_source_type",
+    "is_supported_file",
+    "load_file",
+    # Manifest
+    "IngestManifest",
+    "DEFAULT_MANIFEST_PATH",
+    # Pipeline
+    "ingest_file",
+    "ingest_directory",
+    "ingest_path",
+]
