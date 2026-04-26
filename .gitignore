@@ -53,7 +53,7 @@ credentials*.json
 # These files are for local AI tooling only and should not be committed.
 AGENTS.md
 CLAUDE.md
-settings.local.json
+.claude/settings.local.json
 skill_create_plan.md
 plans/open-questions.md
 
