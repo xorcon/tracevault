@@ -30,38 +30,24 @@ id_ed25519.pub
 service-account*.json
 credentials*.json
 
-# Local runtime data
-data/
-storage/
-uploads/
-documents/
-corpus/
-indexes/
-vector_store/
-vector-db/
-chroma/
-qdrant_storage/
-lancedb/
-.tmp/
-.cache/
+# Local runtime data (root-anchored to avoid hiding nested source modules)
+/data/
+/storage/
+/uploads/
+/documents/
+/corpus/
+/indexes/
+/vector_store/
+/vector-db/
+/chroma/
+/qdrant_storage/
+/lancedb/
+/.tmp/
+/.cache/
+/logs/
+/reports/
+/evaluation-runs/
 
-# Logs
-*.log
-logs/
-
-# Local database files
-*.sqlite
-*.sqlite3
-*.db
-
-# Editor / OS
-.DS_Store
-.vscode/
-.idea/
-
-# Test / generated reports
-reports/
-evaluation-runs/
 
 # These files are for local AI tooling only and should not be committed.
 AGENTS.md
@@ -70,3 +56,7 @@ settings.local.json
 skill_create_plan.md
 plans/open-questions.md
 
+
+# Python packaging artifacts
+*.egg-info/
+.eggs/
