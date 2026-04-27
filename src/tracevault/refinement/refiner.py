@@ -122,6 +122,46 @@ def check_no_new_facts(raw_text: str, cleaned_text: str) -> RefinementWarnings:
     return warnings
 
 
+def _is_evidence_line(line: str) -> bool:
+    """Check if line is evidence-like structured text that should preserve whitespace.
+
+    Returns True for:
+    - Config key/value patterns (key:  value)
+    - Assignment expressions (x =  1)
+    - Table separators (---, |||, etc.)
+    - Lines starting with pipe (markdown tables)
+    - Lines with multiple consecutive spaces that look like tables
+    - Lines with colons followed by multiple spaces (config-like)
+    """
+    stripped = line.strip()
+
+    # Empty lines or whitespace-only
+    if not stripped:
+        return False
+
+    # Table separators
+    if stripped.startswith("---") or stripped.startswith("|||") or stripped.startswith("==="):
+        return True
+
+    # Markdown table rows (start with pipe or contain multiple pipes)
+    if stripped.startswith("|") or stripped.endswith("|"):
+        return True
+
+    # Config-like: key:  value (colon followed by multiple spaces)
+    if re.search(r":\s{2,}", line):
+        return True
+
+    # Assignment-like: x =  1 (equals followed by multiple spaces)
+    if re.search(r"=\s{2,}", line):
+        return True
+
+    # Code-like: indented lines with content (likely code blocks)
+    if line.startswith("    ") or line.startswith("\t"):
+        return True
+
+    return False
+
+
 def rule_based_refine(
     raw_text: str,
     prompt_version: str = "v1.0",
@@ -159,22 +199,33 @@ def rule_based_refine(
     text = raw_text
 
     # Step 1: Trim leading/trailing whitespace
-    text = text.strip()
+    # Trim safely.
+    # For evidence-like documents, preserve leading indentation because it may be code/config.
+    if any(_is_evidence_line(line) for line in text.splitlines()):
+        text = text.strip("\n")
+    else:
+        text = text.strip()
 
     # Step 2: Normalize excessive blank lines (3+ newlines -> 2 newlines)
     text = re.sub(r"\n{3,}", "\n\n", text)
 
     # Step 3: Normalize excessive spaces (3+ spaces -> 2 spaces) but preserve indentation
+    # and evidence-like structured text
     # Process line by line to preserve leading whitespace (indentation)
     lines = text.split("\n")
     processed_lines = []
     for line in lines:
+        # Skip whitespace normalization for evidence-like lines
+        if _is_evidence_line(line):
+            processed_lines.append(line)
+            continue
+
         # Preserve leading whitespace, normalize trailing/internal excessive spaces
         match = re.match(r"^(\s*)(\S.*)?(\s*)$", line)
         if match:
             leading = match.group(1) or ""
             content = match.group(2) or ""
-            # Normalize multiple spaces within content to single space, then ensure sentences have space after
+            # Normalize multiple spaces within content to single space
             content = re.sub(r"\s{2,}", " ", content)
             processed_lines.append(leading + content)
         else:

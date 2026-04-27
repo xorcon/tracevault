@@ -44,27 +44,29 @@ def _find_split_point(text: str, target: int, max_pos: int) -> int:
     """Find optimal split point near target position.
 
     Tries to split at newline or sentence boundary if split_on_newline is True.
+    Never returns a position greater than target (enforces chunk_size as maximum).
 
     Args:
         text: Full text
-        target: Target split position
-        max_pos: Maximum allowed position
+        target: Target split position (hard maximum)
+        max_pos: Maximum allowed position in text
 
     Returns:
-        Optimal split position
+        Optimal split position (always <= target, always >= 1 to ensure progress)
     """
-    if target >= max_pos:
-        return max_pos
+    # Clamp target to max_pos
+    target = min(target, max_pos)
 
-    # Look for newline within next 50 characters
-    for i in range(target, min(target + 50, max_pos)):
+    # Look for newline before target (prefer earlier split, not later)
+    # But never go below 1 to ensure we always make progress
+    for i in range(target - 1, max(1, target - 50), -1):
         if text[i] == "\n":
             return i
 
-    # Look for sentence boundary (. followed by space or newline)
-    for i in range(target, min(target + 50, max_pos)):
-        if i + 1 < max_pos and text[i] in ".!?" and text[i + 1] in " \n":
-            return i + 1
+    # Look for sentence boundary before target
+    for i in range(target - 1, max(1, target - 50), -1):
+        if i > 0 and text[i - 1] in ".!?" and text[i] in " \n":
+            return i
 
     return target
 
@@ -84,9 +86,9 @@ def chunk_text(
     Args:
         document_id: Parent document identifier
         raw_text: Original text to chunk (preserved exactly)
-        chunk_size: Maximum characters per chunk
-        overlap: Characters to overlap between consecutive chunks (default: 200, or 0 if chunk_size <= 200)
-        split_on_newline: If True, prefer splitting at newlines
+        chunk_size: Maximum characters per chunk (hard limit)
+        overlap: Characters to overlap between consecutive chunks (default: 200, or 0 if chunk_size <= 1)
+        split_on_newline: If True, prefer splitting at newlines (default: True)
 
     Returns:
         List of TextChunk objects with raw_text preserved exactly
@@ -94,8 +96,13 @@ def chunk_text(
     Raises:
         ValueError: If chunk_size <= 0, overlap < 0, or overlap >= chunk_size
 
+    Note:
+        When split_on_newline=True, chunks may be shorter than chunk_size if a
+        newline or sentence boundary is found before chunk_size. Chunks never
+        exceed chunk_size.
+
     Example:
-        >>> chunks = chunk_text("doc_001", "Hello world", chunk_size=5)
+        >>> chunks = chunk_text("doc_001", "Hello world", chunk_size=5, overlap=0)
         >>> len(chunks)
         3
         >>> chunks[0].raw_text
@@ -103,7 +110,7 @@ def chunk_text(
     """
     # Set default overlap based on chunk_size
     if overlap is None:
-        overlap = min(200, chunk_size - 1) if chunk_size > 1 else 0
+        overlap = 0
 
     # Validate parameters
     if chunk_size <= 0:
@@ -126,8 +133,13 @@ def chunk_text(
         end_pos = min(pos + chunk_size, text_length)
 
         # Try to find better split point if not at end
+        # Ensure we always make progress: new_pos = end_pos - overlap > pos
+        # So end_pos must be > pos + overlap
         if end_pos < text_length and split_on_newline:
-            end_pos = _find_split_point(raw_text, end_pos, text_length)
+            candidate = _find_split_point(raw_text, end_pos, text_length)
+            # Only use candidate if it ensures we advance past current pos
+            if candidate > pos + overlap:
+                end_pos = candidate
 
         # Extract chunk
         chunk_raw = raw_text[pos:end_pos]

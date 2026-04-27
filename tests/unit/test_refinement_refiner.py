@@ -136,3 +136,46 @@ class TestNoNewFactsSafeguard:
         warnings = check_no_new_facts(raw, cleaned)
         # "is" should be filtered as stop word
         assert "is" not in warnings.added_words
+
+
+class TestEvidenceProtection:
+    """Tests for evidence-like structured text protection."""
+
+    def test_preserves_config_key_value_spacing(self):
+        """Config lines with key:  value preserve spacing."""
+        text = "server.port:  8080"
+        cleaned, _ = rule_based_refine(text)
+        assert "  " in cleaned  # Double space preserved
+        assert "server.port:  8080" == cleaned
+
+    def test_preserves_assignment_spacing(self):
+        """Assignment expressions preserve spacing."""
+        text = "x =  1"
+        cleaned, _ = rule_based_refine(text)
+        assert "  " in cleaned  # Double space preserved
+        assert "x =  1" == cleaned
+
+    def test_preserves_markdown_table_spacing(self):
+        """Markdown pipe table spacing is preserved."""
+        text = "| Name | Value |\n|------|-------|\n| a | 1 |"
+        cleaned, _ = rule_based_refine(text)
+        assert cleaned == text
+
+    def test_preserves_table_separator(self):
+        """Table separator lines are preserved."""
+        text = "---"
+        cleaned, _ = rule_based_refine(text)
+        assert cleaned == "---"
+
+    def test_preserves_indented_code(self):
+        """Indented code lines preserve indentation."""
+        text = "    def foo():\n        x =  1"
+        cleaned, _ = rule_based_refine(text)
+        assert cleaned == text
+
+    def test_normal_prose_still_normalized(self):
+        """Normal prose can still be safely normalized."""
+        text = "  Hello   world  "
+        cleaned, _ = rule_based_refine(text)
+        assert cleaned == "Hello world"
+        assert "   " not in cleaned

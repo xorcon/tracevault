@@ -75,8 +75,6 @@ def refine_document(
     # Step 2: Refine each chunk
     refined_chunks: list[TextChunk] = []
     all_warnings: list[str] = []
-    total_raw = 0
-    total_cleaned = 0
 
     for chunk in chunks:
         # Apply rule-based refinement
@@ -85,7 +83,7 @@ def refine_document(
             prompt_version=prompt_version,
         )
 
-        # Update chunk with cleaned text
+        # Update chunk with cleaned text and full metadata
         refined_chunk = TextChunk(
             chunk_id=chunk.chunk_id,
             document_id=chunk.document_id,
@@ -95,14 +93,22 @@ def refine_document(
             start_offset=chunk.start_offset,
             end_offset=chunk.end_offset,
             raw_text_hash=chunk.raw_text_hash,
-            metadata=chunk.metadata,
+            metadata={
+                "refinement_method": chunk_metadata.refinement_method,
+                "prompt_version": chunk_metadata.prompt_version,
+                "model_name": chunk_metadata.model_name,
+                "created_at": chunk_metadata.created_at,
+                "warnings": chunk_metadata.warnings,
+                "no_new_facts_checked": chunk_metadata.no_new_facts_checked,
+                "source_raw_hash": chunk_metadata.source_raw_hash,
+                "raw_text_length": chunk_metadata.raw_text_length,
+                "cleaned_text_length": chunk_metadata.cleaned_text_length,
+            },
         )
         refined_chunks.append(refined_chunk)
 
-        # Accumulate statistics
+        # Accumulate warnings for document-level metadata
         all_warnings.extend(chunk_metadata.warnings)
-        total_raw += chunk_metadata.raw_text_length
-        total_cleaned += chunk_metadata.cleaned_text_length
 
     # Step 3: Build overall metadata
     overall_metadata = RefinementMetadata(
@@ -113,16 +119,16 @@ def refine_document(
         warnings=list(set(all_warnings)),  # Deduplicate
         no_new_facts_checked=True,
         source_raw_hash=TextChunk.compute_raw_hash(raw_text) if raw_text else None,
-        cleaned_text_length=total_cleaned,
-        raw_text_length=total_raw,
+        cleaned_text_length=len(raw_text),  # Document-level: original length
+        raw_text_length=len(raw_text),
     )
 
-    # Step 4: Return result
+    # Step 4: Return result with document-level stats (not sum of overlapped chunks)
     return RefinementResult(
         document_id=document_id,
         chunks=refined_chunks,
         metadata=overall_metadata,
         total_chunks=len(refined_chunks),
-        total_raw_chars=total_raw,
-        total_cleaned_chars=total_cleaned,
+        total_raw_chars=len(raw_text),  # Document length, not sum of chunks
+        total_cleaned_chars=len(raw_text),  # Approximate; exact de-overlap not reliable in Phase 3A
     )

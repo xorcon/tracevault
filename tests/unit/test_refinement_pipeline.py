@@ -108,3 +108,57 @@ class TestRefineDocument:
             assert chunk.document_id == "doc_001"
             assert chunk.chunk_id.startswith("chunk_doc_001_")
             assert chunk.raw_text_hash
+
+    def test_per_chunk_refinement_metadata_preserved(self):
+        """Each chunk carries full refinement metadata from rule_based_refine."""
+        text = "Hello world test"
+        result = refine_document("doc_001", text, chunk_size=10)
+        for chunk in result.chunks:
+            meta = chunk.metadata
+            # Required proof fields
+            assert "refinement_method" in meta
+            assert meta["refinement_method"] == "rule_based"
+            assert "prompt_version" in meta
+            assert "created_at" in meta
+            assert "warnings" in meta
+            assert "no_new_facts_checked" in meta
+            assert meta["no_new_facts_checked"] is True
+            assert "source_raw_hash" in meta
+            assert "raw_text_length" in meta
+            assert "cleaned_text_length" in meta
+
+    def test_chunk_source_raw_hash_matches_chunk_content(self):
+        """Chunk metadata source_raw_hash matches chunk raw_text hash."""
+        text = "Hello world test document"
+        result = refine_document("doc_001", text)
+        for chunk in result.chunks:
+            expected_hash = chunk.raw_text_hash
+            assert chunk.metadata["source_raw_hash"] == expected_hash
+
+    def test_document_stats_equal_original_length_with_overlap(self):
+        """Document stats report original length, not sum of overlapped chunks."""
+        text = "x" * 1500  # 1500 chars
+        result = refine_document("doc_001", text, chunk_size=1000, overlap=200)
+        # total_raw_chars should be document length, not sum of chunk lengths
+        assert result.total_raw_chars == 1500
+        # With overlap, sum of chunk raw lengths would be > 1500
+        sum_chunk_lengths = sum(len(c.raw_text) for c in result.chunks)
+        assert sum_chunk_lengths > 1500  # Verify overlap actually happened
+        assert result.total_raw_chars < sum_chunk_lengths  # Verify we don't double-count
+
+    def test_to_dict_includes_full_metadata(self):
+        """to_dict() includes all required metadata fields."""
+        text = "Test"
+        result = refine_document("doc_001", text)
+        d = result.to_dict()
+        meta = d["metadata"]
+        # Check all required fields
+        assert "refinement_method" in meta
+        assert "prompt_version" in meta
+        assert "model_name" in meta
+        assert "created_at" in meta
+        assert "warnings" in meta
+        assert "no_new_facts_checked" in meta
+        assert "source_raw_hash" in meta
+        assert "raw_text_length" in meta
+        assert "cleaned_text_length" in meta

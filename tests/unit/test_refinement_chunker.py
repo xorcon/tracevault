@@ -109,3 +109,27 @@ class TestChunking:
         chunks = chunk_text("doc_001", text)
         assert chunks[0].raw_text_hash
         assert len(chunks[0].raw_text_hash) == 64  # SHA-256
+
+    def test_chunk_size_hard_limit_with_newlines(self):
+        """No chunk exceeds chunk_size even with split_on_newline=True."""
+        # Text with newline at position chunk_size+5
+        text = "a" * 10 + "\n" + "b" * 10
+        chunks = chunk_text("doc_001", text, chunk_size=10, split_on_newline=True)
+        for chunk in chunks:
+            assert len(chunk.raw_text) <= 10, f"Chunk {chunk.chunk_id} exceeds chunk_size"
+
+    def test_chunk_size_hard_limit_no_newlines(self):
+        """Text without newlines splits exactly at chunk_size."""
+        text = "abcdefghij" * 3  # 30 chars, no newlines
+        chunks = chunk_text("doc_001", text, chunk_size=10, split_on_newline=True)
+        for chunk in chunks:
+            assert len(chunk.raw_text) <= 10
+        assert len(chunks) == 3
+
+    def test_split_prefers_newline_before_limit(self):
+        """When newline exists before chunk_size, split there instead of at limit."""
+        text = "abc\ndefghij"  # newline at position 3
+        chunks = chunk_text("doc_001", text, chunk_size=10, split_on_newline=True)
+        # Should split at newline (position 3), not at 10
+        assert len(chunks) > 1
+        assert len(chunks[0].raw_text) < 10  # Split at newline, not at 10
