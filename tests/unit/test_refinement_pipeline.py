@@ -162,3 +162,36 @@ class TestRefineDocument:
         assert "source_raw_hash" in meta
         assert "raw_text_length" in meta
         assert "cleaned_text_length" in meta
+
+    def test_cleaned_length_reflects_actual_cleaned_text(self):
+        """total_cleaned_chars and metadata.cleaned_text_length reflect actual cleaned length."""
+        raw_text = "  Hello   world  "
+        result = refine_document("doc_001", raw_text, chunk_size=100)
+
+        # Raw text length is 17
+        assert result.total_raw_chars == len(raw_text)
+        assert result.metadata.raw_text_length == len(raw_text)
+
+        # Cleaned text is "Hello world" (length 11)
+        expected_cleaned = "Hello world"
+        assert result.chunks[0].cleaned_text == expected_cleaned
+        assert result.total_cleaned_chars == len(expected_cleaned)
+        assert result.metadata.cleaned_text_length == len(expected_cleaned)
+
+        # Verify to_dict includes correct values
+        d = result.to_dict()
+        assert d["metadata"]["cleaned_text_length"] == len(expected_cleaned)
+        assert d["total_cleaned_chars"] == len(expected_cleaned)
+
+    def test_overlap_does_not_inflate_cleaned_stats(self):
+        """With overlap, total_cleaned_chars equals sum of chunk cleaned lengths."""
+        text = "x" * 1500
+        result = refine_document("doc_001", text, chunk_size=1000, overlap=200)
+
+        # total_raw_chars is document length
+        assert result.total_raw_chars == 1500
+
+        # total_cleaned_chars equals sum of chunk cleaned_text lengths
+        sum_cleaned = sum(len(c.cleaned_text) for c in result.chunks)
+        assert result.total_cleaned_chars == sum_cleaned
+        assert result.metadata.cleaned_text_length == sum_cleaned

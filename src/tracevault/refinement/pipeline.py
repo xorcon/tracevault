@@ -110,6 +110,9 @@ def refine_document(
         # Accumulate warnings for document-level metadata
         all_warnings.extend(chunk_metadata.warnings)
 
+    # Compute actual cleaned text length (sum of all refined chunk cleaned_text)
+    total_cleaned_chars = sum(len(c.cleaned_text) for c in refined_chunks)
+
     # Step 3: Build overall metadata
     overall_metadata = RefinementMetadata(
         refinement_method="rule_based",
@@ -119,16 +122,16 @@ def refine_document(
         warnings=list(set(all_warnings)),  # Deduplicate
         no_new_facts_checked=True,
         source_raw_hash=TextChunk.compute_raw_hash(raw_text) if raw_text else None,
-        cleaned_text_length=len(raw_text),  # Document-level: original length
-        raw_text_length=len(raw_text),
+        raw_text_length=len(raw_text),  # Document original length
+        cleaned_text_length=total_cleaned_chars,  # Actual cleaned output length
     )
 
-    # Step 4: Return result with document-level stats (not sum of overlapped chunks)
+    # Step 4: Return result with correct statistics
     return RefinementResult(
         document_id=document_id,
         chunks=refined_chunks,
         metadata=overall_metadata,
         total_chunks=len(refined_chunks),
         total_raw_chars=len(raw_text),  # Document length, not sum of chunks
-        total_cleaned_chars=len(raw_text),  # Approximate; exact de-overlap not reliable in Phase 3A
+        total_cleaned_chars=total_cleaned_chars,  # Actual cleaned output length
     )
