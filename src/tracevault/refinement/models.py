@@ -76,6 +76,13 @@ class RefinementMetadata:
         source_raw_hash: Hash of original raw text for traceability
         cleaned_text_length: Length of cleaned text
         raw_text_length: Length of raw text
+
+        # Model refinement tracking (Phase 3B)
+        model_refinement_attempted: Whether model refinement was attempted
+        model_refinement_accepted: Whether model output passed guardrails
+        attempted_model_name: Name of model that was attempted (even if fallback occurred)
+        guardrail_violations: List of guardrail violations if model rejected
+        fallback_reason: Reason for falling back to rule-based (if applicable)
     """
 
     refinement_method: RefinementMethod
@@ -87,6 +94,13 @@ class RefinementMetadata:
     source_raw_hash: str | None = None
     cleaned_text_length: int = 0
     raw_text_length: int = 0
+
+    # Model refinement tracking (Phase 3B)
+    model_refinement_attempted: bool = False
+    model_refinement_accepted: bool = False
+    attempted_model_name: str | None = None
+    guardrail_violations: list[str] = field(default_factory=list)
+    fallback_reason: str | None = None
 
     @staticmethod
     def get_current_timestamp() -> str:
@@ -135,12 +149,17 @@ class RefinementResult:
                 "refinement_method": self.metadata.refinement_method,
                 "prompt_version": self.metadata.prompt_version,
                 "model_name": self.metadata.model_name,
+                "attempted_model_name": self.metadata.attempted_model_name,
                 "created_at": self.metadata.created_at,
                 "warnings": self.metadata.warnings,
                 "no_new_facts_checked": self.metadata.no_new_facts_checked,
                 "source_raw_hash": self.metadata.source_raw_hash,
                 "raw_text_length": self.metadata.raw_text_length,
                 "cleaned_text_length": self.metadata.cleaned_text_length,
+                "model_refinement_attempted": self.metadata.model_refinement_attempted,
+                "model_refinement_accepted": self.metadata.model_refinement_accepted,
+                "guardrail_violations": self.metadata.guardrail_violations,
+                "fallback_reason": self.metadata.fallback_reason,
             },
             "total_chunks": self.total_chunks,
             "total_raw_chars": self.total_raw_chars,
