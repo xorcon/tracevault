@@ -100,6 +100,8 @@ This is for audit-critical enterprise data. Accuracy > aesthetics."""
         return f"""Refine the following text by normalizing whitespace only.
 Preserve all facts, numbers, and structure.
 
+Prompt version: {self.version}
+
 Input (preserve exactly, only normalize whitespace):
 ---
 {raw_text}

@@ -50,8 +50,6 @@ class OllamaModelAdapter:
         self.timeout_seconds = timeout_seconds
         self.max_tokens = max_tokens
         self.temperature = temperature
-        # Prompt builder is the single source of truth for prompts
-        self.prompt_builder = RefinementPromptBuilder()
 
     @property
     def name(self) -> str:

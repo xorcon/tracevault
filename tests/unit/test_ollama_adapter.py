@@ -228,6 +228,10 @@ class TestOllamaAdapterPromptVersion:
             prompt = json_payload["prompt"]
             assert "test text" in prompt
 
+            # CRITICAL: the prompt must contain the requested prompt_version
+            assert "v2.0" in prompt
+            assert "Prompt version:" in prompt
+
     def test_prompt_version_passed_to_builder(self):
         """prompt_version is passed to RefinementPromptBuilder."""
         adapter = OllamaModelAdapter(
@@ -259,8 +263,6 @@ class TestOllamaAdapterPromptVersion:
 
     def test_different_prompt_versions_produce_different_prompts(self):
         """Different prompt versions produce different prompt content."""
-        # This test verifies that the RefinementPromptBuilder.version attribute
-        # is actually used when building prompts
         from tracevault.refinement.prompt_builder import RefinementPromptBuilder
 
         builder_v1 = RefinementPromptBuilder(version="v1.0")
@@ -277,6 +279,15 @@ class TestOllamaAdapterPromptVersion:
         assert prompt_v2.input_text == "test"
         assert prompt_v1.full_prompt is not None
         assert prompt_v2.full_prompt is not None
+
+        # CRITICAL: different versions must produce different prompt bodies
+        assert prompt_v1.full_prompt != prompt_v2.full_prompt
+
+        # Each prompt must contain its own version
+        assert "v1.0" in prompt_v1.full_prompt
+        assert "v2.0" in prompt_v2.full_prompt
+        assert "v2.0" not in prompt_v1.full_prompt
+        assert "v1.0" not in prompt_v2.full_prompt
 
 
 class TestOllamaAdapterSuccess:
