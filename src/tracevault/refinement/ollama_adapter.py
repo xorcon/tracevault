@@ -14,6 +14,7 @@ from tracevault.refinement.model_adapter import (
     ModelRefinementOutput,
     ModelTimeoutError,
 )
+from tracevault.refinement.prompt_builder import RefinementPromptBuilder
 
 
 class OllamaModelAdapter:
@@ -49,6 +50,8 @@ class OllamaModelAdapter:
         self.timeout_seconds = timeout_seconds
         self.max_tokens = max_tokens
         self.temperature = temperature
+        # Prompt builder is the single source of truth for prompts
+        self.prompt_builder = RefinementPromptBuilder()
 
     @property
     def name(self) -> str:
@@ -87,7 +90,7 @@ class OllamaModelAdapter:
 
         Args:
             raw_text: Original text to refine
-            prompt_version: Version identifier (passed to prompt builder)
+            prompt_version: Version identifier passed to RefinementPromptBuilder
 
         Returns:
             ModelRefinementOutput with cleaned_text
@@ -104,8 +107,11 @@ class OllamaModelAdapter:
                 model_name=self.model_name,
             )
 
-        # Build refinement prompt
-        prompt = self._build_refinement_prompt(raw_text, prompt_version)
+        # Build refinement prompt using RefinementPromptBuilder
+        # prompt_version is passed to configure the builder
+        builder = RefinementPromptBuilder(version=prompt_version)
+        prompt_obj = builder.build(raw_text)
+        prompt = prompt_obj.full_prompt
 
         try:
             resp = requests.post(
@@ -158,35 +164,6 @@ class OllamaModelAdapter:
             ) from e
         except requests.RequestException as e:
             raise ModelConnectionError(f"Ollama request failed: {e}") from e
-
-    def _build_refinement_prompt(self, raw_text: str, version: str) -> str:
-        """Build refinement prompt for Ollama.
-
-        Args:
-            raw_text: Text to refine
-            version: Prompt version identifier
-
-        Returns:
-            Formatted prompt string
-        """
-        base = """You are a text normalization assistant. Clean the following text while preserving ALL facts, numbers, names, dates, and technical terms.
-
-Rules:
-1. Trim leading/trailing whitespace
-2. Normalize excessive blank lines (3+ to 2)
-3. Normalize excessive spaces (3+ to 1-2) but preserve indentation in code
-4. Preserve ALL factual content, numbers, identifiers, timestamps
-5. Do NOT add, remove, or change any facts
-6. Do NOT summarize or translate
-7. Output ONLY valid JSON with key "cleaned_text"
-
-Input text:
-"""
-        suffix = """
-
-Output JSON:
-"""
-        return base + raw_text + suffix
 
     def _extract_cleaned_text(self, json_output: str) -> str:
         """Extract cleaned_text from model JSON output.

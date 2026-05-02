@@ -102,9 +102,11 @@ def _try_model_refine(
 
     if adapter is None:
         # Adapter unavailable but config.enabled=True
-        # Use rule-based but record that we attempted to use the configured model
+        # Use rule-based but record that we attempted model refinement
         cleaned, meta = rule_based_refine(raw_text, prompt_version)
         meta.attempted_model_name = attempted_model
+        meta.model_refinement_attempted = True
+        meta.model_refinement_accepted = False
         meta.fallback_reason = "adapter_unavailable"
         return cleaned, meta
 

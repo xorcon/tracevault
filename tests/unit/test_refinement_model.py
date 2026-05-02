@@ -125,14 +125,16 @@ class TestDefaultBehavior:
         assert meta.model_refinement_attempted is False
 
     def test_no_adapter_falls_back_to_rule_based(self):
-        """When adapter returns None, uses rule-based."""
+        """When adapter returns None, uses rule-based with attempted=True."""
         config = LocalModelRefinementConfig(enabled=True)
         provider = FakeAdapterProvider(None)  # No adapter
 
         cleaned, meta = refine_text("  test  ", config=config, adapter_provider=provider)
 
         assert meta.refinement_method == "rule_based"
-        assert meta.model_refinement_attempted is False
+        assert meta.model_refinement_attempted is True
+        assert meta.model_refinement_accepted is False
+        assert meta.fallback_reason == "adapter_unavailable"
 
 
 class TestTimeoutFallback:
@@ -486,7 +488,7 @@ class TestRefineDocumentMetadata:
         assert any("guardrail" in str(w).lower() for w in result.metadata.warnings)
 
     def test_refine_document_adapter_unavailable_metadata(self):
-        """When adapter returns None, metadata shows adapter_unavailable."""
+        """When adapter returns None, metadata shows adapter_unavailable with attempted=True."""
         from tracevault.refinement.pipeline import refine_document
 
         config = LocalModelRefinementConfig(enabled=True, model_name="configured-model")
@@ -503,4 +505,5 @@ class TestRefineDocumentMetadata:
         assert result.metadata.refinement_method == "rule_based"
         assert result.metadata.fallback_reason == "adapter_unavailable"
         assert result.metadata.attempted_model_name == "configured-model"
-        assert result.metadata.model_refinement_attempted is False
+        assert result.metadata.model_refinement_attempted is True
+        assert result.metadata.model_refinement_accepted is False
