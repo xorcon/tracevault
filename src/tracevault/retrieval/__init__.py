@@ -6,54 +6,82 @@ Implements hybrid retrieval combining:
 - Metadata filtering
 - Score merging and reranking
 
-Phase 4 will implement the full hybrid retrieval pipeline.
+Phase 4: Hybrid Retrieval Foundation
 """
 
-from typing import Protocol, TypedDict, runtime_checkable
+from tracevault.retrieval.audit import (
+    build_response,
+    build_trace,
+    compute_query_hash,
+    generate_run_id,
+    rank_candidates,
+)
+from tracevault.retrieval.filters import (
+    apply_filters,
+    describe_filters,
+    filter_by_document_id,
+    filter_by_metadata,
+    filter_by_source_path,
+    filter_by_source_type,
+)
+from tracevault.retrieval.interfaces import (
+    BaseRetriever,
+    HybridRetriever,
+    KeywordRetriever,
+    VectorRetriever,
+)
+from tracevault.retrieval.keyword import InMemoryKeywordRetriever
+from tracevault.retrieval.models import (
+    CandidateEvidence,
+    MetadataFilter,
+    RetrievalRequest,
+    RetrievalResponse,
+    RetrievalResult,
+    RetrievalScore,
+    RetrievalTrace,
+    TextRetrievalPolicy,
+)
+from tracevault.retrieval.pipeline import HybridRetrievalPipeline
+from tracevault.retrieval.scoring import HybridScoreMerger, normalize_scores
+from tracevault.retrieval.text_policy import apply_text_policy, get_search_text
+from tracevault.retrieval.vector import InMemoryVectorRetrieverPlaceholder
 
-
-class EvidenceItem(TypedDict):
-    """Retrieved evidence item."""
-    chunk_id: str
-    document_id: str
-    raw_text: str
-    cleaned_text: str
-    score: float
-    retrieval_source: str  # 'vector', 'keyword', or 'hybrid'
-    metadata: dict
-
-
-@runtime_checkable
-class Retriever(Protocol):
-    """Protocol for hybrid retrieval."""
-
-    def retrieve(
-        self,
-        query: str,
-        top_k: int = 5,
-        alpha: float = 0.5,
-        filters: dict | None = None
-    ) -> list[EvidenceItem]:
-        """Retrieve evidence for a query.
-
-        Args:
-            query: Search query.
-            top_k: Maximum results to return.
-            alpha: Hybrid weight (0=BM25 only, 1=vector only).
-            filters: Metadata filters.
-
-        Returns:
-            List of evidence items ranked by relevance.
-        """
-        ...
-
-    def build_evidence_pack(self, evidence_items: list[EvidenceItem]) -> dict:
-        """Build structured evidence pack for reasoning.
-
-        Args:
-            evidence_items: Retrieved evidence items.
-
-        Returns:
-            Structured context for the reasoning model.
-        """
-        ...
+__all__ = [
+    # Models
+    "CandidateEvidence",
+    "MetadataFilter",
+    "RetrievalRequest",
+    "RetrievalResponse",
+    "RetrievalResult",
+    "RetrievalScore",
+    "RetrievalTrace",
+    "TextRetrievalPolicy",
+    # Interfaces
+    "BaseRetriever",
+    "HybridRetriever",
+    "KeywordRetriever",
+    "VectorRetriever",
+    # Implementations
+    "InMemoryKeywordRetriever",
+    "InMemoryVectorRetrieverPlaceholder",
+    "HybridRetrievalPipeline",
+    # Scoring
+    "HybridScoreMerger",
+    "normalize_scores",
+    # Filters
+    "apply_filters",
+    "describe_filters",
+    "filter_by_document_id",
+    "filter_by_metadata",
+    "filter_by_source_path",
+    "filter_by_source_type",
+    # Text policy
+    "apply_text_policy",
+    "get_search_text",
+    # Audit
+    "build_response",
+    "build_trace",
+    "compute_query_hash",
+    "generate_run_id",
+    "rank_candidates",
+]
