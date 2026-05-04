@@ -11,6 +11,28 @@ from tracevault.retrieval.models import (
 )
 
 
+def _derive_source_retrievers(s: ScoringCandidate) -> list[str]:
+    """Derive source retriever names from a ScoringCandidate.
+
+    Uses source_retrievers if present, otherwise falls back to
+    [retrieval_source].
+    """
+    if s.source_retrievers:
+        return s.source_retrievers
+    return [s.retrieval_source] if s.retrieval_source else []
+
+
+def _deduplicate_ordered(items: list[str]) -> list[str]:
+    """Deduplicate strings while preserving order."""
+    seen = set()
+    result = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
 class HybridScoreMerger:
     """Merges keyword and vector retrieval results into hybrid scores.
 
@@ -67,18 +89,20 @@ class HybridScoreMerger:
             if kw and vec:
                 retrieval_source = "hybrid"
                 matched_fields = sorted(set(kw.matched_fields) | set(vec.matched_fields))
-                source_retrievers = ["keyword", "vector_placeholder"]
+                source_retrievers = _deduplicate_ordered(
+                    _derive_source_retrievers(kw) + _derive_source_retrievers(vec)
+                )
                 score_policy = "hybrid"
             elif kw:
-                retrieval_source = "keyword"
+                retrieval_source = kw.retrieval_source
                 matched_fields = sorted(kw.matched_fields)
-                source_retrievers = ["keyword"]
-                score_policy = "token_frequency"
+                source_retrievers = _derive_source_retrievers(kw)
+                score_policy = kw.score.score_policy
             else:
-                retrieval_source = "vector_placeholder"
+                retrieval_source = vec.retrieval_source
                 matched_fields = sorted(vec.matched_fields)
-                source_retrievers = ["vector_placeholder"]
-                score_policy = "deterministic_placeholder"
+                source_retrievers = _derive_source_retrievers(vec)
+                score_policy = vec.score.score_policy
 
             merged.append(
                 ScoringCandidate(
