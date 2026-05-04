@@ -562,6 +562,7 @@ class TestScoringCandidate:
             retrieval_source="keyword",
             source_retrievers=["keyword"],
         )
+        assert s.retrieval_source == "keyword"
         assert "_matched_fields" not in c.metadata
         assert "_retrieval_source" not in c.metadata
         assert "_source_retrievers" not in c.metadata
@@ -593,6 +594,7 @@ class TestScoringCandidate:
             retrieval_source="keyword",
             source_retrievers=["keyword"],
         )
+        assert s.candidate is c
         assert c.raw_text == "Original"
         assert c.cleaned_text == "Original"
         assert c.metadata == {}

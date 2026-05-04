@@ -6,7 +6,6 @@ Defines protocols for retrievers and the hybrid orchestration interface.
 from typing import Protocol, runtime_checkable
 
 from tracevault.retrieval.models import (
-    CandidateEvidence,
     RetrievalRequest,
     RetrievalResponse,
     ScoringCandidate,

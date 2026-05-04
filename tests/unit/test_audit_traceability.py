@@ -808,27 +808,3 @@ class TestScoringCandidateIsolation:
         assert "_source_retrievers" not in s.candidate.metadata
 
 
-class TestPipelineTextPolicyOverrideFailsOnOldBehavior:
-    """This test would fail on the previous behavior where request.text_policy was not enforced."""
-
-    def test_request_policy_overrides_retriever_default_in_pipeline(self):
-        """Pipeline must enforce request.text_policy, not just record it."""
-        corpus = [
-            _make_candidate(raw_text="rawword", cleaned_text="cleanedword"),
-        ]
-        # Pipeline built with RAW_ONLY
-        kw = InMemoryKeywordRetriever(corpus, text_policy=TextRetrievalPolicy.raw_only())
-        vec = InMemoryVectorRetrieverPlaceholder(corpus)
-        pipeline = HybridRetrievalPipeline(kw, vec)
-
-        # Request with CLEANED_ONLY — should find "cleanedword"
-        # On old behavior, this would fail because keyword retriever would use RAW_ONLY
-        req = RetrievalRequest(
-            query="cleanedword", top_k=5, text_policy=TextRetrievalPolicy.cleaned_only()
-        )
-        resp = pipeline.retrieve(req)
-        assert len(resp.results) == 1, (
-            "request.text_policy=CLEANED_ONLY should find 'cleanedword' in cleaned_text, "
-            "but pipeline did not enforce request policy"
-        )
-        assert resp.text_policy.mode == "CLEANED_ONLY"

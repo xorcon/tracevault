@@ -8,7 +8,6 @@ import uuid
 
 from tracevault.retrieval.filters import describe_filters
 from tracevault.retrieval.models import (
-    CandidateEvidence,
     MetadataFilter,
     RetrievalResponse,
     RetrievalResult,

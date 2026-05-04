@@ -2,6 +2,7 @@
 
 import pytest
 
+from tracevault.retrieval.keyword import InMemoryKeywordRetriever
 from tracevault.retrieval.models import CandidateEvidence, RetrievalScore, ScoringCandidate
 from tracevault.retrieval.scoring import HybridScoreMerger
 
@@ -322,8 +323,8 @@ class TestRetrievalResultTraceFromPipeline:
     """Pipeline-level: trace fields come from ScoringCandidate, not candidate.metadata."""
 
     def test_trace_has_retrieval_source(self):
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [_make_candidate(raw_text="Python", cleaned_text="Python")]
         pipeline = create_pipeline(corpus)
@@ -333,8 +334,8 @@ class TestRetrievalResultTraceFromPipeline:
         assert r.trace.retrieval_source in ("keyword", "hybrid")
 
     def test_trace_has_matched_fields(self):
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [_make_candidate(raw_text="Python", cleaned_text="Python")]
         pipeline = create_pipeline(corpus)
@@ -344,8 +345,8 @@ class TestRetrievalResultTraceFromPipeline:
         assert len(r.trace.matched_fields) >= 1
 
     def test_trace_has_source_retrievers(self):
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [_make_candidate(raw_text="Python", cleaned_text="Python")]
         pipeline = create_pipeline(corpus)
@@ -356,8 +357,8 @@ class TestRetrievalResultTraceFromPipeline:
 
     def test_candidate_metadata_clean_after_pipeline(self):
         """Pipeline results should have clean candidate.metadata."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [_make_candidate(raw_text="Python", cleaned_text="Python")]
         pipeline = create_pipeline(corpus)
@@ -370,8 +371,8 @@ class TestRetrievalResultTraceFromPipeline:
 
     def test_response_text_policy_equals_executed_policy(self):
         """Response.text_policy must equal the actual executed policy."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest, TextRetrievalPolicy
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [
             _make_candidate(raw_text="rawword", cleaned_text="cleanedword"),
@@ -396,8 +397,8 @@ class TestRetrievalResultTraceFromPipeline:
 
     def test_pipeline_text_policy_override_affects_search(self):
         """Pipeline must enforce request.text_policy, not just record it."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest, TextRetrievalPolicy
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [
             _make_candidate(raw_text="rawword", cleaned_text="cleanedword"),
@@ -424,8 +425,8 @@ class TestRetrievalResultTraceFromPipeline:
 
     def test_pipeline_raw_only_finds_raw_term(self):
         """RAW_ONLY request finds a term only in raw_text."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest, TextRetrievalPolicy
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [
             _make_candidate(raw_text="SECRET keyword", cleaned_text="cleaned text"),
@@ -439,8 +440,8 @@ class TestRetrievalResultTraceFromPipeline:
 
     def test_pipeline_cleaned_only_finds_cleaned_term(self):
         """CLEANED_ONLY request finds a term only in cleaned_text."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest, TextRetrievalPolicy
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [
             _make_candidate(raw_text="raw text", cleaned_text="CLEANED keyword"),
@@ -454,8 +455,8 @@ class TestRetrievalResultTraceFromPipeline:
 
     def test_pipeline_cleaned_only_preserves_raw_text(self):
         """CLEANED_ONLY response still preserves raw_text."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest, TextRetrievalPolicy
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [
             _make_candidate(raw_text="Original raw content", cleaned_text="CLEANED keyword"),
@@ -474,8 +475,8 @@ class TestTwoRunsSameCandidateNoStaleTrace:
 
     def test_two_different_requests_different_traces(self):
         """Two different RetrievalRequests against same corpus produce different traces."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [_make_candidate(raw_text="Python programming", cleaned_text="Python programming")]
         pipeline = create_pipeline(corpus)
@@ -497,8 +498,8 @@ class TestTwoRunsSameCandidateNoStaleTrace:
 
     def test_original_corpus_metadata_clean_after_retrieval(self):
         """Original corpus candidate.metadata does not contain run-specific keys."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [_make_candidate(raw_text="Python", cleaned_text="Python")]
         pipeline = create_pipeline(corpus)
@@ -510,8 +511,8 @@ class TestTwoRunsSameCandidateNoStaleTrace:
 
     def test_per_result_trace_contains_required_fields(self):
         """Per-result trace contains retrieval_source, matched_fields, etc."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [_make_candidate(raw_text="Python", cleaned_text="Python")]
         pipeline = create_pipeline(corpus)
@@ -524,8 +525,8 @@ class TestTwoRunsSameCandidateNoStaleTrace:
 
     def test_serialization_preserves_per_result_trace(self):
         """Serialization preserves per-result trace metadata."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [_make_candidate(raw_text="Python", cleaned_text="Python")]
         pipeline = create_pipeline(corpus)
@@ -540,8 +541,8 @@ class TestTwoRunsSameCandidateNoStaleTrace:
 
     def test_no_stale_trace_metadata_survives_across_runs(self):
         """No stale trace metadata survives across runs."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [_make_candidate(raw_text="Python", cleaned_text="Python")]
         pipeline = create_pipeline(corpus)
@@ -598,8 +599,8 @@ class TestPipelineTextPolicyOverrideFailsOnOldBehavior:
 
     def test_request_policy_overrides_retriever_default_in_pipeline(self):
         """Pipeline must enforce request.text_policy, not just record it."""
-        from tracevault.retrieval.pipeline import create_pipeline
         from tracevault.retrieval.models import RetrievalRequest, TextRetrievalPolicy
+        from tracevault.retrieval.pipeline import create_pipeline
 
         corpus = [
             _make_candidate(raw_text="rawword", cleaned_text="cleanedword"),
@@ -642,6 +643,3 @@ def _make_candidate(
         raw_text_hash=raw_text_hash,
         metadata=metadata or {},
     )
-
-
-from tracevault.retrieval.keyword import InMemoryKeywordRetriever
