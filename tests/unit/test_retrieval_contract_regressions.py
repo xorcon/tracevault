@@ -145,20 +145,28 @@ class TestPipelineTextPolicyContract:
         resp = pipeline.retrieve(req)
         assert resp is not None
 
-    def test_custom_retriever_receives_request_text_policy_none(self):
-        """When request.text_policy is None, pipeline passes None to retriever.
+    def test_custom_retriever_receives_effective_text_policy_when_request_none(self):
+        """When request.text_policy is None, retriever receives pipeline.default_text_policy.
 
-        The pipeline passes request.text_policy directly to the keyword retriever.
-        The retriever falls back to its own constructor default. The pipeline's
-        default_text_policy is only used for the response text_policy field.
+        The pipeline computes effective_text_policy = request.text_policy or
+        pipeline.default_text_policy. The same effective policy is passed to
+        the keyword retriever and reported in the response — no audit mismatch.
         """
         corpus = [_make_candidate(raw_text="Python programming", cleaned_text="Python programming")]
         pipeline = self._make_pipeline_with_mock_kw(corpus)
         req = RetrievalRequest(query="Python", top_k=5, text_policy=None)
-        pipeline.retrieve(req)
+        resp = pipeline.retrieve(req)
 
-        # Pipeline passes request.text_policy (None) to the retriever
-        assert pipeline.keyword_retriever.received_text_policy is None
+        # Retriever receives the pipeline default, not None
+        assert pipeline.keyword_retriever.received_text_policy is not None
+        assert pipeline.keyword_retriever.received_text_policy.mode == "DUAL_CONTEXT"
+
+        # Response reports the same effective policy
+        assert resp.text_policy.mode == "DUAL_CONTEXT"
+        assert (
+            pipeline.keyword_retriever.received_text_policy.mode
+            == resp.text_policy.mode
+        )
 
     def test_response_text_policy_equals_pipeline_default(self):
         """Response.text_policy equals pipeline.default_text_policy when request has none."""

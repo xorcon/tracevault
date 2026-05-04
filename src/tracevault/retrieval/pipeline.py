@@ -79,12 +79,15 @@ class HybridRetrievalPipeline(HybridRetriever):
         # Convert filters — to_dict() flattens key_value into top level
         filters_dict = request.filters.to_dict() if request.filters else None
 
-        # Step 2: Run keyword retrieval with text_policy
+        # Determine effective text policy — request overrides pipeline default
+        effective_text_policy = request.text_policy or self.default_text_policy
+
+        # Step 2: Run keyword retrieval with effective text_policy
         keyword_results = self.keyword_retriever.retrieve(
             query=request.query,
             top_k=request.top_k * 2,
             filters=filters_dict,
-            text_policy=request.text_policy,
+            text_policy=effective_text_policy,
         )
 
         # Step 3: Run vector placeholder retrieval
@@ -106,9 +109,6 @@ class HybridRetrievalPipeline(HybridRetriever):
         # Step 4: Merge with hybrid scoring
         merger = HybridScoreMerger(alpha=request.alpha)
         merged = merger.merge(keyword_results, vector_results)
-
-        # Determine effective text policy — request overrides pipeline default
-        effective_text_policy = request.text_policy or self.default_text_policy
 
         # Step 5: Rank with trace construction
         results = rank_candidates(
