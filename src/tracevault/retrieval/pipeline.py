@@ -37,6 +37,9 @@ class HybridRetrievalPipeline(HybridRetriever):
           search text based on the policy.
         - text_policy does NOT remove raw_text from results — raw_text
           is always preserved as the authoritative source of truth.
+        - Pipeline owns a default_text_policy (DUAL_CONTEXT by default).
+          request.text_policy overrides it. The pipeline must NOT depend
+          on keyword_retriever.text_policy existing.
 
     retrieval_run_id:
         - If request.retrieval_run_id is provided, it is used.
@@ -49,11 +52,13 @@ class HybridRetrievalPipeline(HybridRetriever):
         self,
         keyword_retriever: KeywordRetriever | None = None,
         vector_retriever: VectorRetriever | None = None,
+        default_text_policy: TextRetrievalPolicy | None = None,
     ) -> None:
         # Allow construction without retrievers for testing
         kw = keyword_retriever or InMemoryKeywordRetriever([])
         vec = vector_retriever or InMemoryVectorRetrieverPlaceholder([])
         super().__init__(kw, vec)
+        self.default_text_policy = default_text_policy or TextRetrievalPolicy.dual_context()
 
     def retrieve(
         self,
@@ -102,8 +107,8 @@ class HybridRetrievalPipeline(HybridRetriever):
         merger = HybridScoreMerger(alpha=request.alpha)
         merged = merger.merge(keyword_results, vector_results)
 
-        # Determine effective text policy — request overrides retriever default
-        effective_text_policy = request.text_policy or self.keyword_retriever.text_policy
+        # Determine effective text policy — request overrides pipeline default
+        effective_text_policy = request.text_policy or self.default_text_policy
 
         # Step 5: Rank with trace construction
         results = rank_candidates(
@@ -138,4 +143,4 @@ def create_pipeline(
     """
     kw = InMemoryKeywordRetriever(corpus, text_policy=text_policy)
     vec = InMemoryVectorRetrieverPlaceholder(corpus)
-    return HybridRetrievalPipeline(kw, vec)
+    return HybridRetrievalPipeline(kw, vec, default_text_policy=text_policy)
