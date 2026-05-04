@@ -9,6 +9,8 @@ from tracevault.retrieval.models import (
     CandidateEvidence,
     RetrievalRequest,
     RetrievalResponse,
+    ScoringCandidate,
+    TextRetrievalPolicy,
 )
 
 
@@ -26,25 +28,29 @@ class BaseRetriever(Protocol):
         query: str,
         top_k: int = 5,
         filters: dict | None = None,
-    ) -> list[CandidateEvidence]:
+        text_policy: TextRetrievalPolicy | None = None,
+    ) -> list[ScoringCandidate]:
         """Retrieve evidence candidates for a query.
 
         Args:
             query: Search query text.
             top_k: Maximum number of results to return.
             filters: Metadata filter criteria.
+            text_policy: Per-request text policy override. If None, uses
+                the retriever's constructor-time default.
 
         Returns:
-            List of CandidateEvidence ranked by relevance.
+            List of ScoringCandidate ranked by relevance.
         """
         ...
 
 
 @runtime_checkable
 class KeywordRetriever(BaseRetriever, Protocol):
-    """Protocol for keyword/BM25-based retrievers.
+    """Protocol for keyword-based retrievers.
 
-    Keyword retrievers search over lexical tokens in raw_text and/or cleaned_text.
+    Keyword retrievers search over lexical tokens in raw_text and/or cleaned_text
+    using token-frequency scoring.
     """
 
     source_type: str = "keyword"
@@ -54,7 +60,8 @@ class KeywordRetriever(BaseRetriever, Protocol):
         query: str,
         top_k: int = 5,
         filters: dict | None = None,
-    ) -> list[CandidateEvidence]:
+        text_policy: TextRetrievalPolicy | None = None,
+    ) -> list[ScoringCandidate]:
         ...
 
 
@@ -62,7 +69,8 @@ class KeywordRetriever(BaseRetriever, Protocol):
 class VectorRetriever(BaseRetriever, Protocol):
     """Protocol for vector similarity retrievers.
 
-    Vector retrievers search over embeddings of cleaned_text.
+    Future real vector retrievers will search over embeddings of cleaned_text.
+    Phase 4 provides a deterministic placeholder — not real vector retrieval.
     """
 
     source_type: str = "vector"
@@ -72,7 +80,8 @@ class VectorRetriever(BaseRetriever, Protocol):
         query: str,
         top_k: int = 5,
         filters: dict | None = None,
-    ) -> list[CandidateEvidence]:
+        text_policy: TextRetrievalPolicy | None = None,
+    ) -> list[ScoringCandidate]:
         ...
 
 

@@ -12,6 +12,7 @@ from tracevault.retrieval.models import (
     RetrievalResult,
     RetrievalScore,
     RetrievalTrace,
+    ScoringCandidate,
     TextRetrievalPolicy,
 )
 
@@ -43,31 +44,23 @@ def _make_candidate(
 
 
 class TestTextRetrievalPolicy:
-    """Tests for TextRetrievalPolicy."""
-
     def test_raw_only_mode(self):
         policy = TextRetrievalPolicy.raw_only()
         assert policy.mode == "RAW_ONLY"
         assert policy.uses_raw() is True
         assert policy.uses_cleaned() is False
-        assert policy.preserves_raw() is True
-        assert policy.preserves_cleaned() is False
 
     def test_cleaned_only_mode(self):
         policy = TextRetrievalPolicy.cleaned_only()
         assert policy.mode == "CLEANED_ONLY"
         assert policy.uses_raw() is False
         assert policy.uses_cleaned() is True
-        assert policy.preserves_raw() is False
-        assert policy.preserves_cleaned() is True
 
     def test_dual_context_mode(self):
         policy = TextRetrievalPolicy.dual_context()
         assert policy.mode == "DUAL_CONTEXT"
         assert policy.uses_raw() is True
         assert policy.uses_cleaned() is True
-        assert policy.preserves_raw() is True
-        assert policy.preserves_cleaned() is True
 
     def test_invalid_mode_raises(self):
         with pytest.raises(ValueError, match="Invalid"):
@@ -80,8 +73,6 @@ class TestTextRetrievalPolicy:
 
 
 class TestMetadataFilter:
-    """Tests for MetadataFilter."""
-
     def test_empty_filter(self):
         f = MetadataFilter()
         assert f.is_empty() is True
@@ -146,37 +137,37 @@ class TestMetadataFilter:
         assert f.matches(c) is True
 
     def test_combined_filter_one_fails(self):
-        f = MetadataFilter(
-            document_id="doc_001",
-            source_type="md",
-        )
-        c = _make_candidate(
-            document_id="doc_001",
-            source_type="txt",
-        )
+        f = MetadataFilter(document_id="doc_001", source_type="md")
+        c = _make_candidate(document_id="doc_001", source_type="txt")
         assert f.matches(c) is False
 
-    def test_to_dict(self):
+    def test_to_dict_flattens_key_value(self):
         f = MetadataFilter(
             document_id="doc_001",
             source_path="docs/test.md",
-            key_value={"env": "prod"},
+            key_value={"env": "prod", "team": "infra"},
         )
         d = f.to_dict()
         assert d["document_id"] == "doc_001"
         assert d["source_path"] == "docs/test.md"
-        assert d["key_value"]["env"] == "prod"
+        assert d["env"] == "prod"
+        assert d["team"] == "infra"
+        # key_value should NOT be nested
+        assert "key_value" not in d
+
+    def test_to_dict_empty(self):
+        f = MetadataFilter()
+        assert f.to_dict() == {}
 
 
 class TestRetrievalScore:
-    """Tests for RetrievalScore."""
-
     def test_default_scores(self):
         s = RetrievalScore()
         assert s.keyword_score == 0.0
         assert s.vector_score == 0.0
         assert s.hybrid_score == 0.0
         assert s.alpha == 0.5
+        assert s.score_policy == ""
 
     def test_to_dict(self):
         s = RetrievalScore(
@@ -184,32 +175,29 @@ class TestRetrievalScore:
             vector_score=0.6,
             hybrid_score=0.7,
             alpha=0.5,
+            score_policy="token_frequency",
         )
         d = s.to_dict()
         assert d["keyword_score"] == 0.8
         assert d["vector_score"] == 0.6
         assert d["hybrid_score"] == 0.7
         assert d["alpha"] == 0.5
+        assert d["score_policy"] == "token_frequency"
 
 
 class TestRetrievalTrace:
-    """Tests for RetrievalTrace."""
-
-    def test_required_fields(self):
-        t = RetrievalTrace(
-            document_id="doc_001",
-            chunk_id="chunk_doc_001_0",
-            source_path="docs/test.md",
-            raw_text_hash="abc123",
-        )
-        assert t.document_id == "doc_001"
-        assert t.chunk_id == "chunk_doc_001_0"
-        assert t.source_path == "docs/test.md"
-        assert t.raw_text_hash == "abc123"
+    def test_default_fields(self):
+        t = RetrievalTrace()
+        assert t.document_id == ""
+        assert t.chunk_id == ""
+        assert t.source_path == ""
+        assert t.raw_text_hash == ""
         assert t.cleaned_text_hash is None
         assert t.retrieval_source == ""
         assert t.matched_fields == []
         assert t.applied_filters == []
+        assert t.score_policy == ""
+        assert t.source_retrievers == []
 
     def test_to_dict(self):
         t = RetrievalTrace(
@@ -221,16 +209,19 @@ class TestRetrievalTrace:
             retrieval_source="hybrid",
             matched_fields=["raw_text", "cleaned_text"],
             applied_filters=["document_id=doc_001"],
+            score_policy="hybrid",
+            source_retrievers=["keyword", "vector_placeholder"],
         )
         d = t.to_dict()
         assert d["document_id"] == "doc_001"
         assert d["retrieval_source"] == "hybrid"
         assert d["matched_fields"] == ["raw_text", "cleaned_text"]
+        assert d["applied_filters"] == ["document_id=doc_001"]
+        assert d["score_policy"] == "hybrid"
+        assert d["source_retrievers"] == ["keyword", "vector_placeholder"]
 
 
 class TestCandidateEvidence:
-    """Tests for CandidateEvidence."""
-
     def test_to_dict(self):
         c = _make_candidate()
         d = c.to_dict()
@@ -239,18 +230,29 @@ class TestCandidateEvidence:
         assert d["raw_text"] == "Hello world"
         assert d["cleaned_text"] == "Hello world"
         assert d["raw_text_hash"] == "abc123"
+        # No trace field on CandidateEvidence
+        assert "trace" not in d
+
+    def test_no_trace_field(self):
+        c = _make_candidate()
+        assert not hasattr(c, "trace")
 
 
 class TestRetrievalResult:
-    """Tests for RetrievalResult."""
-
     def test_properties(self):
         c = _make_candidate()
+        t = RetrievalTrace(
+            document_id="doc_001",
+            chunk_id="chunk_doc_001_0",
+            source_path="docs/test.md",
+            raw_text_hash="abc123",
+        )
         r = RetrievalResult(
             rank=1,
             candidate=c,
             retrieval_run_id="run_001",
             query_hash="qhash",
+            trace=t,
         )
         assert r.document_id == "doc_001"
         assert r.chunk_id == "chunk_doc_001_0"
@@ -258,26 +260,41 @@ class TestRetrievalResult:
         assert r.raw_text_hash == "abc123"
         assert r.cleaned_text_hash is None
 
-    def test_to_dict(self):
+    def test_to_dict_includes_trace(self):
         c = _make_candidate()
+        t = RetrievalTrace(
+            document_id="doc_001",
+            chunk_id="chunk_doc_001_0",
+            source_path="docs/test.md",
+            raw_text_hash="abc123",
+            retrieval_source="keyword",
+            score_policy="token_frequency",
+        )
         r = RetrievalResult(
             rank=1,
             candidate=c,
             retrieval_run_id="run_001",
             query_hash="qhash",
+            trace=t,
         )
         d = r.to_dict()
         assert d["rank"] == 1
         assert d["retrieval_run_id"] == "run_001"
         assert d["query_hash"] == "qhash"
+        assert "trace" in d
+        assert d["trace"]["retrieval_source"] == "keyword"
+        assert d["trace"]["score_policy"] == "token_frequency"
 
 
 class TestRetrievalRequest:
-    """Tests for RetrievalRequest."""
-
     def test_default_text_policy(self):
         req = RetrievalRequest(query="test")
-        assert req.text_policy.mode == "DUAL_CONTEXT"
+        # text_policy is None by default; pipeline falls back to retriever policy
+        assert req.text_policy is None
+
+    def test_explicit_text_policy(self):
+        req = RetrievalRequest(query="test", text_policy=TextRetrievalPolicy.raw_only())
+        assert req.text_policy.mode == "RAW_ONLY"
 
     def test_empty_query_validation(self):
         req = RetrievalRequest(query="")
@@ -291,11 +308,6 @@ class TestRetrievalRequest:
 
     def test_invalid_top_k(self):
         req = RetrievalRequest(query="test", top_k=0)
-        errors = req.validate()
-        assert "top_k must be >= 1" in errors
-
-    def test_negative_top_k(self):
-        req = RetrievalRequest(query="test", top_k=-1)
         errors = req.validate()
         assert "top_k must be >= 1" in errors
 
@@ -328,7 +340,7 @@ class TestRetrievalRequest:
         h1 = RetrievalRequest.compute_query_hash("test query")
         h2 = RetrievalRequest.compute_query_hash("test query")
         assert h1 == h2
-        assert len(h1) == 64  # SHA-256 hex length
+        assert len(h1) == 64
 
     def test_compute_query_hash_different(self):
         h1 = RetrievalRequest.compute_query_hash("query a")
@@ -337,15 +349,20 @@ class TestRetrievalRequest:
 
 
 class TestRetrievalResponse:
-    """Tests for RetrievalResponse."""
-
     def test_to_dict(self):
         c = _make_candidate()
+        t = RetrievalTrace(
+            document_id="doc_001",
+            chunk_id="chunk_doc_001_0",
+            source_path="docs/test.md",
+            raw_text_hash="abc123",
+        )
         r = RetrievalResult(
             rank=1,
             candidate=c,
             retrieval_run_id="run_001",
             query_hash="qhash",
+            trace=t,
         )
         resp = RetrievalResponse(
             retrieval_run_id="run_001",
@@ -367,8 +384,6 @@ class TestRetrievalResponse:
 
 
 class TestModelTraceability:
-    """Tests that models preserve traceability fields."""
-
     def test_candidate_preserves_document_id_chunk_id(self):
         c = _make_candidate(
             document_id="doc_abc",
@@ -390,25 +405,42 @@ class TestModelTraceability:
             raw_text_hash="hash123",
             cleaned_text_hash="hash456",
         )
+        t = RetrievalTrace(
+            document_id="doc_xyz",
+            chunk_id="chunk_doc_xyz_3",
+            source_path="docs/file.md",
+            raw_text_hash="hash123",
+            cleaned_text_hash="hash456",
+        )
         r = RetrievalResult(
             rank=1,
             candidate=c,
             retrieval_run_id="run_001",
             query_hash="qhash",
+            trace=t,
         )
         d = r.to_dict()
         assert d["candidate"]["document_id"] == "doc_xyz"
         assert d["candidate"]["chunk_id"] == "chunk_doc_xyz_3"
         assert d["candidate"]["raw_text_hash"] == "hash123"
         assert d["candidate"]["cleaned_text_hash"] == "hash456"
+        assert d["trace"]["document_id"] == "doc_xyz"
+        assert d["trace"]["raw_text_hash"] == "hash123"
 
     def test_response_preserves_audit_metadata(self):
         c = _make_candidate()
+        t = RetrievalTrace(
+            document_id="doc_001",
+            chunk_id="chunk_doc_001_0",
+            source_path="docs/test.md",
+            raw_text_hash="abc123",
+        )
         r = RetrievalResult(
             rank=1,
             candidate=c,
             retrieval_run_id="run_001",
             query_hash="qhash",
+            trace=t,
         )
         resp = RetrievalResponse(
             retrieval_run_id="run_001",
@@ -427,8 +459,6 @@ class TestModelTraceability:
 
 
 class TestRetrievalDoesNotModifyText:
-    """Tests that retrieval models do not modify raw_text or cleaned_text."""
-
     def test_candidate_does_not_modify_raw_text(self):
         original_raw = "Original raw text"
         c = _make_candidate(raw_text=original_raw)
@@ -446,22 +476,36 @@ class TestRetrievalDoesNotModifyText:
 
     def test_result_does_not_generate_answer(self):
         c = _make_candidate()
+        t = RetrievalTrace(
+            document_id="doc_001",
+            chunk_id="chunk_doc_001_0",
+            source_path="docs/test.md",
+            raw_text_hash="abc123",
+        )
         r = RetrievalResult(
             rank=1,
             candidate=c,
             retrieval_run_id="run_001",
             query_hash="qhash",
+            trace=t,
         )
         assert not hasattr(r, "answer")
         assert "answer" not in r.to_dict()
 
     def test_response_does_not_generate_answer(self):
         c = _make_candidate()
+        t = RetrievalTrace(
+            document_id="doc_001",
+            chunk_id="chunk_doc_001_0",
+            source_path="docs/test.md",
+            raw_text_hash="abc123",
+        )
         r = RetrievalResult(
             rank=1,
             candidate=c,
             retrieval_run_id="run_001",
             query_hash="qhash",
+            trace=t,
         )
         resp = RetrievalResponse(
             retrieval_run_id="run_001",
@@ -476,3 +520,98 @@ class TestRetrievalDoesNotModifyText:
         assert "answer" not in d
         assert "reasoning" not in d
         assert "llm" not in d
+
+
+class TestScoringCandidate:
+    def test_default_fields(self):
+        c = _make_candidate()
+        s = ScoringCandidate(candidate=c)
+        assert s.candidate is c
+        assert s.matched_fields == []
+        assert s.retrieval_source == ""
+        assert s.source_retrievers == []
+
+    def test_explicit_fields(self):
+        c = _make_candidate()
+        score = RetrievalScore(
+            keyword_score=0.8,
+            vector_score=0.6,
+            hybrid_score=0.7,
+            alpha=0.5,
+            score_policy="hybrid",
+        )
+        s = ScoringCandidate(
+            candidate=c,
+            score=score,
+            matched_fields=["raw_text", "cleaned_text"],
+            retrieval_source="hybrid",
+            source_retrievers=["keyword", "vector_placeholder"],
+        )
+        assert s.candidate is c
+        assert s.score is score
+        assert s.matched_fields == ["raw_text", "cleaned_text"]
+        assert s.retrieval_source == "hybrid"
+        assert s.source_retrievers == ["keyword", "vector_placeholder"]
+
+    def test_candidate_metadata_not_polluted(self):
+        """ScoringCandidate trace fields must not be in candidate.metadata."""
+        c = _make_candidate()
+        s = ScoringCandidate(
+            candidate=c,
+            matched_fields=["raw_text"],
+            retrieval_source="keyword",
+            source_retrievers=["keyword"],
+        )
+        assert "_matched_fields" not in c.metadata
+        assert "_retrieval_source" not in c.metadata
+        assert "_source_retrievers" not in c.metadata
+
+    def test_trace_fields_on_scoring_candidate_not_candidate(self):
+        """Trace fields live on ScoringCandidate, not CandidateEvidence."""
+        c = _make_candidate()
+        s = ScoringCandidate(
+            candidate=c,
+            matched_fields=["raw_text"],
+            retrieval_source="keyword",
+            source_retrievers=["keyword"],
+        )
+        # Trace fields on ScoringCandidate
+        assert s.retrieval_source == "keyword"
+        assert s.matched_fields == ["raw_text"]
+        assert s.source_retrievers == ["keyword"]
+        # Not on CandidateEvidence
+        assert not hasattr(c, "retrieval_source")
+        assert not hasattr(c, "matched_fields")
+        assert not hasattr(c, "source_retrievers")
+
+    def test_scoring_candidate_does_not_modify_candidate(self):
+        """Creating ScoringCandidate must not modify the candidate."""
+        c = _make_candidate(raw_text="Original", cleaned_text="Original")
+        s = ScoringCandidate(
+            candidate=c,
+            matched_fields=["raw_text"],
+            retrieval_source="keyword",
+            source_retrievers=["keyword"],
+        )
+        assert c.raw_text == "Original"
+        assert c.cleaned_text == "Original"
+        assert c.metadata == {}
+
+
+class TestNoBM25Wording:
+    """Tests that no public serialization claims BM25."""
+
+    def test_score_to_dict_no_bm25(self):
+        s = RetrievalScore(score_policy="token_frequency")
+        d = s.to_dict()
+        assert "bm25" not in str(d).lower()
+
+    def test_trace_to_dict_no_bm25(self):
+        t = RetrievalTrace(score_policy="token_frequency")
+        d = t.to_dict()
+        assert "bm25" not in str(d).lower()
+
+    def test_candidate_to_dict_no_bm25(self):
+        c = _make_candidate()
+        d = c.to_dict()
+        assert "bm25" not in str(d).lower()

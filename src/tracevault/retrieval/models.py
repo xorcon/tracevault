@@ -24,9 +24,13 @@ class TextRetrievalPolicy:
     """Controls which text fields are used for retrieval.
 
     Policies:
-        RAW_ONLY: Index and search only raw_text
-        CLEANED_ONLY: Index and search only cleaned_text
-        DUAL_CONTEXT: Index and search both, preserve both in results
+        RAW_ONLY: Search only raw_text
+        CLEANED_ONLY: Search only cleaned_text
+        DUAL_CONTEXT: Search both raw_text and cleaned_text
+
+    Note: text_policy affects search text selection only. It does NOT
+    remove or blank raw_text from returned evidence — raw_text is the
+    authoritative source of truth.
     """
 
     mode: Literal["RAW_ONLY", "CLEANED_ONLY", "DUAL_CONTEXT"]
@@ -48,19 +52,11 @@ class TextRetrievalPolicy:
         return cls(mode="DUAL_CONTEXT")
 
     def uses_raw(self) -> bool:
-        """Return True if raw_text is used for retrieval."""
+        """Return True if raw_text is used for search."""
         return self.mode in ("RAW_ONLY", "DUAL_CONTEXT")
 
     def uses_cleaned(self) -> bool:
-        """Return True if cleaned_text is used for retrieval."""
-        return self.mode in ("CLEANED_ONLY", "DUAL_CONTEXT")
-
-    def preserves_raw(self) -> bool:
-        """Return True if raw_text should be preserved in results."""
-        return self.mode in ("RAW_ONLY", "DUAL_CONTEXT")
-
-    def preserves_cleaned(self) -> bool:
-        """Return True if cleaned_text should be preserved in results."""
+        """Return True if cleaned_text is used for search."""
         return self.mode in ("CLEANED_ONLY", "DUAL_CONTEXT")
 
 
@@ -105,16 +101,20 @@ class MetadataFilter:
         return True
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for serialization."""
-        result = {}
+        """Convert to flat dictionary for serialization.
+
+        key_value pairs are flattened into the top level so retrievers
+        can extract them without double-wrapping.
+        """
+        result: dict = {}
         if self.document_id is not None:
             result["document_id"] = self.document_id
         if self.source_path is not None:
             result["source_path"] = self.source_path
         if self.source_type is not None:
             result["source_type"] = self.source_type
-        if self.key_value:
-            result["key_value"] = dict(self.key_value)
+        # Flatten key_value into top level
+        result.update(self.key_value)
         return result
 
 
@@ -123,16 +123,18 @@ class RetrievalScore:
     """Score components for a single retrieval candidate.
 
     Attributes:
-        keyword_score: Normalized BM25/keyword score [0.0, 1.0]
-        vector_score: Normalized vector similarity score [0.0, 1.0]
+        keyword_score: Normalized keyword score [0.0, 1.0]
+        vector_score: Normalized vector score [0.0, 1.0]
         hybrid_score: alpha * vector + (1 - alpha) * keyword
         alpha: Hybrid weight used to compute hybrid_score
+        score_policy: Scoring method identifier
     """
 
     keyword_score: float = 0.0
     vector_score: float = 0.0
     hybrid_score: float = 0.0
     alpha: float = 0.5
+    score_policy: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -140,12 +142,16 @@ class RetrievalScore:
             "vector_score": self.vector_score,
             "hybrid_score": self.hybrid_score,
             "alpha": self.alpha,
+            "score_policy": self.score_policy,
         }
 
 
 @dataclass
 class RetrievalTrace:
     """Full audit trail for a single retrieval result.
+
+    This is per-run metadata — not stable corpus evidence.
+    Constructed during pipeline response construction.
 
     Attributes:
         document_id: Source document identifier
@@ -156,6 +162,8 @@ class RetrievalTrace:
         retrieval_source: Which retrieval path(s) returned this candidate
         matched_fields: Which text fields matched the query
         applied_filters: Filters that were applied
+        score_policy: Scoring method identifier
+        source_retrievers: Which retrievers contributed scores
     """
 
     document_id: str = ""
@@ -166,6 +174,8 @@ class RetrievalTrace:
     retrieval_source: str = ""
     matched_fields: list[str] = field(default_factory=list)
     applied_filters: list[str] = field(default_factory=list)
+    score_policy: str = ""
+    source_retrievers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -177,6 +187,8 @@ class RetrievalTrace:
             "retrieval_source": self.retrieval_source,
             "matched_fields": self.matched_fields,
             "applied_filters": self.applied_filters,
+            "score_policy": self.score_policy,
+            "source_retrievers": self.source_retrievers,
         }
 
 
@@ -184,7 +196,8 @@ class RetrievalTrace:
 class CandidateEvidence:
     """A single retrieved chunk with scores and traceability.
 
-    This is the internal representation before final ranking.
+    This is stable evidence identity — not per-run metadata.
+    Per-run audit data lives on RetrievalResult.trace.
 
     Attributes:
         document_id: Source document identifier
@@ -197,7 +210,6 @@ class CandidateEvidence:
         raw_text_hash: SHA-256 of raw_text
         cleaned_text_hash: SHA-256 of cleaned_text
         score: RetrievalScore with component scores
-        trace: RetrievalTrace with audit metadata
         metadata: Additional chunk metadata from refinement
     """
 
@@ -211,7 +223,6 @@ class CandidateEvidence:
     raw_text_hash: str
     cleaned_text_hash: str | None = None
     score: RetrievalScore = field(default_factory=RetrievalScore)
-    trace: RetrievalTrace = field(default_factory=RetrievalTrace)
     metadata: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -226,9 +237,31 @@ class CandidateEvidence:
             "raw_text_hash": self.raw_text_hash,
             "cleaned_text_hash": self.cleaned_text_hash,
             "score": self.score.to_dict(),
-            "trace": self.trace.to_dict(),
             "metadata": self.metadata,
         }
+
+
+@dataclass
+class ScoringCandidate:
+    """Transient wrapper around CandidateEvidence for retrieval scoring.
+
+    Carries run-specific metadata (matched_fields, retrieval_source,
+    source_retrievers) that must NOT leak into CandidateEvidence.metadata.
+    This keeps evidence identity stable across retrieval runs.
+
+    Attributes:
+        candidate: The stable CandidateEvidence.
+        score: Computed score for this retrieval run.
+        matched_fields: Which text fields matched the query.
+        retrieval_source: Which retrieval path(s) returned this candidate.
+        source_retrievers: Which retrievers contributed scores.
+    """
+
+    candidate: CandidateEvidence
+    score: RetrievalScore = field(default_factory=RetrievalScore)
+    matched_fields: list[str] = field(default_factory=list)
+    retrieval_source: str = ""
+    source_retrievers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -240,12 +273,14 @@ class RetrievalResult:
         candidate: The underlying CandidateEvidence
         retrieval_run_id: Unique identifier for this retrieval run
         query_hash: SHA-256 of the query string
+        trace: Per-run audit trail
     """
 
     rank: int
     candidate: CandidateEvidence
     retrieval_run_id: str
     query_hash: str
+    trace: RetrievalTrace
 
     @property
     def document_id(self) -> str:
@@ -273,6 +308,7 @@ class RetrievalResult:
             "candidate": self.candidate.to_dict(),
             "retrieval_run_id": self.retrieval_run_id,
             "query_hash": self.query_hash,
+            "trace": self.trace.to_dict(),
         }
 
 
@@ -285,7 +321,7 @@ class RetrievalRequest:
         top_k: Maximum number of results to return
         alpha: Hybrid weight (0.0 = keyword only, 1.0 = vector only)
         filters: Metadata filters to apply
-        text_policy: Controls which text fields are used
+        text_policy: Controls which text fields are used for search
         retrieval_run_id: Optional run identifier (auto-generated if not provided)
     """
 
@@ -297,8 +333,7 @@ class RetrievalRequest:
     retrieval_run_id: str | None = None
 
     def __post_init__(self):
-        if self.text_policy is None:
-            object.__setattr__(self, "text_policy", TextRetrievalPolicy.dual_context())
+        pass  # text_policy defaults to None; pipeline falls back to retriever policy
 
     def validate(self) -> list[str]:
         """Validate the request. Returns list of error messages."""

@@ -1,8 +1,8 @@
 """Retrieval module.
 
 Implements hybrid retrieval combining:
-- Vector search over cleaned_text
-- BM25/keyword search over raw_text and cleaned_text
+- Deterministic placeholder vector scores (not real vector retrieval)
+- Token-frequency keyword search over raw_text and cleaned_text
 - Metadata filtering
 - Score merging and reranking
 
@@ -39,11 +39,15 @@ from tracevault.retrieval.models import (
     RetrievalResult,
     RetrievalScore,
     RetrievalTrace,
+    ScoringCandidate,
     TextRetrievalPolicy,
 )
-from tracevault.retrieval.pipeline import HybridRetrievalPipeline
-from tracevault.retrieval.scoring import HybridScoreMerger, normalize_scores
-from tracevault.retrieval.text_policy import apply_text_policy, get_search_text
+from tracevault.retrieval.pipeline import (
+    HybridRetrievalPipeline,
+    create_pipeline,
+)
+from tracevault.retrieval.scoring import HybridScoreMerger
+from tracevault.retrieval.text_policy import get_search_text
 from tracevault.retrieval.vector import InMemoryVectorRetrieverPlaceholder
 
 __all__ = [
@@ -55,6 +59,7 @@ __all__ = [
     "RetrievalResult",
     "RetrievalScore",
     "RetrievalTrace",
+    "ScoringCandidate",
     "TextRetrievalPolicy",
     # Interfaces
     "BaseRetriever",
@@ -65,9 +70,9 @@ __all__ = [
     "InMemoryKeywordRetriever",
     "InMemoryVectorRetrieverPlaceholder",
     "HybridRetrievalPipeline",
+    "create_pipeline",
     # Scoring
     "HybridScoreMerger",
-    "normalize_scores",
     # Filters
     "apply_filters",
     "describe_filters",
@@ -76,7 +81,6 @@ __all__ = [
     "filter_by_source_path",
     "filter_by_source_type",
     # Text policy
-    "apply_text_policy",
     "get_search_text",
     # Audit
     "build_response",

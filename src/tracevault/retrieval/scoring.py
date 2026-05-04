@@ -1,61 +1,14 @@
-"""Hybrid score merging and normalization.
+"""Hybrid score merging.
 
-Combines keyword and vector scores into a hybrid score with deterministic
+Combines keyword and vector scores into hybrid scores with deterministic
 tie-breaking.
 """
 
 from tracevault.retrieval.models import (
     CandidateEvidence,
     RetrievalScore,
-    RetrievalTrace,
+    ScoringCandidate,
 )
-
-
-def normalize_scores(
-    candidates: list[CandidateEvidence],
-    score_field: str = "keyword_score",
-) -> list[CandidateEvidence]:
-    """Normalize scores to [0.0, 1.0] range using min-max normalization."""
-    if not candidates:
-        return []
-
-    scores = [getattr(c.score, score_field) for c in candidates]
-    min_score = min(scores)
-    max_score = max(scores)
-
-    if max_score == min_score:
-        return list(candidates)
-
-    range_score = max_score - min_score
-
-    result = []
-    for c in candidates:
-        new_score = RetrievalScore(
-            keyword_score=(c.score.keyword_score - min_score) / range_score
-            if score_field == "keyword_score"
-            else c.score.keyword_score,
-            vector_score=(c.score.vector_score - min_score) / range_score
-            if score_field == "vector_score"
-            else c.score.vector_score,
-            hybrid_score=c.score.hybrid_score,
-            alpha=c.score.alpha,
-        )
-        new_candidate = CandidateEvidence(
-            document_id=c.document_id,
-            chunk_id=c.chunk_id,
-            chunk_index=c.chunk_index,
-            source_path=c.source_path,
-            source_type=c.source_type,
-            raw_text=c.raw_text,
-            cleaned_text=c.cleaned_text,
-            raw_text_hash=c.raw_text_hash,
-            cleaned_text_hash=c.cleaned_text_hash,
-            score=new_score,
-            trace=c.trace,
-            metadata=c.metadata,
-        )
-        result.append(new_candidate)
-    return result
 
 
 class HybridScoreMerger:
@@ -78,27 +31,27 @@ class HybridScoreMerger:
 
     def merge(
         self,
-        keyword_results: list[CandidateEvidence],
-        vector_results: list[CandidateEvidence],
-    ) -> list[CandidateEvidence]:
+        keyword_results: list[ScoringCandidate],
+        vector_results: list[ScoringCandidate],
+    ) -> list[ScoringCandidate]:
         """Merge keyword and vector results with hybrid scoring.
 
         Deduplicates by (document_id, chunk_id). If a candidate appears in
         both result sets, combines the scores.
         """
-        keyword_map: dict[tuple[str, str], CandidateEvidence] = {}
-        for c in keyword_results:
-            key = (c.document_id, c.chunk_id)
-            keyword_map[key] = c
+        keyword_map: dict[tuple[str, str], ScoringCandidate] = {}
+        for s in keyword_results:
+            key = (s.candidate.document_id, s.candidate.chunk_id)
+            keyword_map[key] = s
 
-        vector_map: dict[tuple[str, str], CandidateEvidence] = {}
-        for c in vector_results:
-            key = (c.document_id, c.chunk_id)
-            vector_map[key] = c
+        vector_map: dict[tuple[str, str], ScoringCandidate] = {}
+        for s in vector_results:
+            key = (s.candidate.document_id, s.candidate.chunk_id)
+            vector_map[key] = s
 
         all_keys = set(keyword_map.keys()) | set(vector_map.keys())
 
-        merged = []
+        merged: list[ScoringCandidate] = []
         for key in all_keys:
             kw = keyword_map.get(key)
             vec = vector_map.get(key)
@@ -108,55 +61,67 @@ class HybridScoreMerger:
 
             hybrid_score = self.alpha * vector_score + (1 - self.alpha) * keyword_score
 
-            base = kw if kw else vec
+            base = kw.candidate if kw else vec.candidate
 
+            # Determine retrieval source and matched fields from ScoringCandidate
             if kw and vec:
                 retrieval_source = "hybrid"
-                matched_fields = list(set(kw.trace.matched_fields) | set(vec.trace.matched_fields))
+                matched_fields = sorted(set(kw.matched_fields) | set(vec.matched_fields))
+                source_retrievers = ["keyword", "vector_placeholder"]
+                score_policy = "hybrid"
             elif kw:
                 retrieval_source = "keyword"
-                matched_fields = list(kw.trace.matched_fields)
+                matched_fields = sorted(kw.matched_fields)
+                source_retrievers = ["keyword"]
+                score_policy = "token_frequency"
             else:
-                retrieval_source = "vector"
-                matched_fields = list(vec.trace.matched_fields)
+                retrieval_source = "vector_placeholder"
+                matched_fields = sorted(vec.matched_fields)
+                source_retrievers = ["vector_placeholder"]
+                score_policy = "deterministic_placeholder"
 
-            result = CandidateEvidence(
-                document_id=base.document_id,
-                chunk_id=base.chunk_id,
-                chunk_index=base.chunk_index,
-                source_path=base.source_path,
-                source_type=base.source_type,
-                raw_text=base.raw_text,
-                cleaned_text=base.cleaned_text,
-                raw_text_hash=base.raw_text_hash,
-                cleaned_text_hash=base.cleaned_text_hash,
-                score=RetrievalScore(
-                    keyword_score=keyword_score,
-                    vector_score=vector_score,
-                    hybrid_score=hybrid_score,
-                    alpha=self.alpha,
-                ),
-                trace=RetrievalTrace(
-                    document_id=base.document_id,
-                    chunk_id=base.chunk_id,
-                    source_path=base.source_path,
-                    raw_text_hash=base.raw_text_hash,
-                    cleaned_text_hash=base.cleaned_text_hash,
-                    retrieval_source=retrieval_source,
+            merged.append(
+                ScoringCandidate(
+                    candidate=CandidateEvidence(
+                        document_id=base.document_id,
+                        chunk_id=base.chunk_id,
+                        chunk_index=base.chunk_index,
+                        source_path=base.source_path,
+                        source_type=base.source_type,
+                        raw_text=base.raw_text,
+                        cleaned_text=base.cleaned_text,
+                        raw_text_hash=base.raw_text_hash,
+                        cleaned_text_hash=base.cleaned_text_hash,
+                        score=RetrievalScore(
+                            keyword_score=keyword_score,
+                            vector_score=vector_score,
+                            hybrid_score=hybrid_score,
+                            alpha=self.alpha,
+                            score_policy=score_policy,
+                        ),
+                        metadata=dict(base.metadata),
+                    ),
+                    score=RetrievalScore(
+                        keyword_score=keyword_score,
+                        vector_score=vector_score,
+                        hybrid_score=hybrid_score,
+                        alpha=self.alpha,
+                        score_policy=score_policy,
+                    ),
                     matched_fields=matched_fields,
-                ),
-                metadata=base.metadata,
+                    retrieval_source=retrieval_source,
+                    source_retrievers=source_retrievers,
+                )
             )
-            merged.append(result)
 
         # Deterministic sort
         merged.sort(
-            key=lambda c: (
-                -c.score.hybrid_score,
-                -c.score.keyword_score,
-                -c.score.vector_score,
-                c.document_id,
-                c.chunk_id,
+            key=lambda s: (
+                -s.score.hybrid_score,
+                -s.score.keyword_score,
+                -s.score.vector_score,
+                s.candidate.document_id,
+                s.candidate.chunk_id,
             )
         )
 

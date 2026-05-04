@@ -1,7 +1,7 @@
-"""Tests for retrieval text policy."""
+"""Tests for text retrieval policy."""
 
 from tracevault.retrieval.models import CandidateEvidence, TextRetrievalPolicy
-from tracevault.retrieval.text_policy import apply_text_policy, get_search_text
+from tracevault.retrieval.text_policy import get_search_text
 
 
 def _make_candidate(
@@ -23,63 +23,78 @@ def _make_candidate(
 class TestGetSearchText:
     def test_raw_only_returns_raw_text(self):
         c = _make_candidate()
-        text = get_search_text(c, TextRetrievalPolicy.raw_only())
-        assert text == "Raw text here"
+        policy = TextRetrievalPolicy.raw_only()
+        result = get_search_text(c, policy)
+        assert result == "Raw text here"
 
     def test_cleaned_only_returns_cleaned_text(self):
         c = _make_candidate()
-        text = get_search_text(c, TextRetrievalPolicy.cleaned_only())
-        assert text == "Cleaned text here"
+        policy = TextRetrievalPolicy.cleaned_only()
+        result = get_search_text(c, policy)
+        assert result == "Cleaned text here"
 
     def test_dual_context_returns_both(self):
         c = _make_candidate()
-        text = get_search_text(c, TextRetrievalPolicy.dual_context())
-        assert text == "Raw text here Cleaned text here"
+        policy = TextRetrievalPolicy.dual_context()
+        result = get_search_text(c, policy)
+        assert result == "Raw text here Cleaned text here"
 
-
-class TestApplyTextPolicy:
-    def test_raw_only_preserves_raw_clears_cleaned(self):
+    def test_raw_only_does_not_modify_candidate(self):
         c = _make_candidate()
-        result = apply_text_policy([c], TextRetrievalPolicy.raw_only())
-        assert len(result) == 1
-        assert result[0].raw_text == "Raw text here"
-        assert result[0].cleaned_text == ""
+        policy = TextRetrievalPolicy.raw_only()
+        get_search_text(c, policy)
+        assert c.raw_text == "Raw text here"
+        assert c.cleaned_text == "Cleaned text here"
 
-    def test_cleaned_only_preserves_cleaned_clears_raw(self):
+    def test_cleaned_only_does_not_modify_candidate(self):
         c = _make_candidate()
-        result = apply_text_policy([c], TextRetrievalPolicy.cleaned_only())
-        assert len(result) == 1
-        assert result[0].raw_text == ""
-        assert result[0].cleaned_text == "Cleaned text here"
+        policy = TextRetrievalPolicy.cleaned_only()
+        get_search_text(c, policy)
+        assert c.raw_text == "Raw text here"
+        assert c.cleaned_text == "Cleaned text here"
+
+    def test_empty_raw_text(self):
+        c = _make_candidate(raw_text="")
+        policy = TextRetrievalPolicy.raw_only()
+        result = get_search_text(c, policy)
+        assert result == ""
+
+    def test_empty_cleaned_text(self):
+        c = _make_candidate(cleaned_text="")
+        policy = TextRetrievalPolicy.cleaned_only()
+        result = get_search_text(c, policy)
+        assert result == ""
+
+
+class TestTextPolicyDoesNotBlankText:
+    """text_policy must NOT blank raw_text from results."""
+
+    def test_raw_only_preserves_raw_text(self):
+        c = _make_candidate()
+        policy = TextRetrievalPolicy.raw_only()
+        get_search_text(c, policy)
+        assert c.raw_text == "Raw text here"
+        assert c.cleaned_text == "Cleaned text here"
+
+    def test_cleaned_only_preserves_raw_text(self):
+        """CLEANED_ONLY searches cleaned_text only but does NOT blank raw_text."""
+        c = _make_candidate()
+        policy = TextRetrievalPolicy.cleaned_only()
+        get_search_text(c, policy)
+        assert c.raw_text == "Raw text here"
+        assert c.cleaned_text == "Cleaned text here"
 
     def test_dual_context_preserves_both(self):
         c = _make_candidate()
-        result = apply_text_policy([c], TextRetrievalPolicy.dual_context())
-        assert len(result) == 1
-        assert result[0].raw_text == "Raw text here"
-        assert result[0].cleaned_text == "Cleaned text here"
+        policy = TextRetrievalPolicy.dual_context()
+        get_search_text(c, policy)
+        assert c.raw_text == "Raw text here"
+        assert c.cleaned_text == "Cleaned text here"
 
-    def test_does_not_modify_original(self):
-        c = _make_candidate()
-        original_raw = c.raw_text
-        original_cleaned = c.cleaned_text
-        apply_text_policy([c], TextRetrievalPolicy.raw_only())
-        assert c.raw_text == original_raw
-        assert c.cleaned_text == original_cleaned
 
-    def test_preserves_hashes(self):
-        c = _make_candidate()
-        result = apply_text_policy([c], TextRetrievalPolicy.raw_only())
-        assert result[0].raw_text_hash == "abc123"
+class TestNoApplyTextPolicy:
+    """apply_text_policy was removed — it blanked raw_text."""
 
-    def test_empty_input(self):
-        result = apply_text_policy([], TextRetrievalPolicy.dual_context())
-        assert len(result) == 0
-
-    def test_multiple_candidates(self):
-        c1 = _make_candidate(raw_text="First", cleaned_text="first")
-        c2 = _make_candidate(raw_text="Second", cleaned_text="second")
-        result = apply_text_policy([c1, c2], TextRetrievalPolicy.dual_context())
-        assert len(result) == 2
-        assert result[0].raw_text == "First"
-        assert result[1].raw_text == "Second"
+    def test_apply_text_policy_not_exported(self):
+        from tracevault.retrieval import text_policy
+        assert not hasattr(text_policy, "apply_text_policy")

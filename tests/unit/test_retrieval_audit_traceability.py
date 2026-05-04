@@ -13,7 +13,8 @@ from tracevault.retrieval.models import (
     CandidateEvidence,
     MetadataFilter,
     RetrievalRequest,
-    RetrievalResult,
+    RetrievalScore,
+    ScoringCandidate,
     TextRetrievalPolicy,
 )
 from tracevault.retrieval.pipeline import HybridRetrievalPipeline
@@ -43,6 +44,50 @@ def _make_candidate(
         raw_text_hash=raw_text_hash,
         cleaned_text_hash=cleaned_text_hash,
         metadata=metadata or {},
+    )
+
+
+def _make_scoring(
+    document_id="doc_001",
+    chunk_id="chunk_doc_001_0",
+    chunk_index=0,
+    source_path="docs/test.md",
+    source_type="md",
+    raw_text="Hello world",
+    cleaned_text="Hello world",
+    raw_text_hash="abc123",
+    cleaned_text_hash=None,
+    metadata=None,
+    keyword_score=0.0,
+    score_policy="token_frequency",
+    matched_fields=None,
+    retrieval_source="keyword",
+    source_retrievers=None,
+) -> ScoringCandidate:
+    return ScoringCandidate(
+        candidate=CandidateEvidence(
+            document_id=document_id,
+            chunk_id=chunk_id,
+            chunk_index=chunk_index,
+            source_path=source_path,
+            source_type=source_type,
+            raw_text=raw_text,
+            cleaned_text=cleaned_text,
+            raw_text_hash=raw_text_hash,
+            cleaned_text_hash=cleaned_text_hash,
+            score=RetrievalScore(
+                keyword_score=keyword_score,
+                score_policy=score_policy,
+            ),
+            metadata=metadata or {},
+        ),
+        score=RetrievalScore(
+            keyword_score=keyword_score,
+            score_policy=score_policy,
+        ),
+        matched_fields=matched_fields or ["raw_text"],
+        retrieval_source=retrieval_source,
+        source_retrievers=source_retrievers or ["keyword"],
     )
 
 
@@ -86,59 +131,77 @@ class TestComputeCleanedTextHash:
 
 class TestBuildTrace:
     def test_trace_has_required_fields(self):
-        c = _make_candidate()
-        trace = build_trace(c, "keyword", ["raw_text"], None)
+        s = _make_scoring(
+            retrieval_source="keyword",
+            matched_fields=["raw_text"],
+            source_retrievers=["keyword"],
+            score_policy="token_frequency",
+        )
+        trace = build_trace(s, None)
         assert trace.document_id == "doc_001"
         assert trace.chunk_id == "chunk_doc_001_0"
         assert trace.source_path == "docs/test.md"
         assert trace.raw_text_hash == "abc123"
         assert trace.retrieval_source == "keyword"
         assert trace.matched_fields == ["raw_text"]
+        assert trace.score_policy == "token_frequency"
+        assert trace.source_retrievers == ["keyword"]
 
     def test_trace_with_filters(self):
-        c = _make_candidate()
+        s = _make_scoring(
+            retrieval_source="hybrid",
+            matched_fields=["raw_text", "cleaned_text"],
+            source_retrievers=["keyword", "vector_placeholder"],
+            score_policy="hybrid",
+        )
         f = MetadataFilter(document_id="doc_001")
-        trace = build_trace(c, "hybrid", ["raw_text", "cleaned_text"], f)
+        trace = build_trace(s, f)
         assert "document_id=doc_001" in trace.applied_filters
 
     def test_trace_without_filters(self):
-        c = _make_candidate()
-        trace = build_trace(c, "keyword", ["raw_text"], None)
+        s = _make_scoring(
+            retrieval_source="keyword",
+            matched_fields=["raw_text"],
+            source_retrievers=["keyword"],
+            score_policy="token_frequency",
+        )
+        trace = build_trace(s, None)
         assert trace.applied_filters == []
 
 
 class TestRankCandidates:
     def test_rank_is_1_based(self):
-        c = _make_candidate()
-        results = rank_candidates([c], "run_001", "qhash", 5)
+        s = _make_scoring()
+        results = rank_candidates([s], "run_001", "qhash", 5, None)
         assert results[0].rank == 1
 
     def test_top_k_limits(self):
         corpus = [
-            _make_candidate(chunk_id=f"chunk_doc_001_{i}", chunk_index=i)
+            _make_scoring(chunk_id=f"chunk_doc_001_{i}", chunk_index=i)
             for i in range(10)
         ]
-        results = rank_candidates(corpus, "run_001", "qhash", 3)
+        results = rank_candidates(corpus, "run_001", "qhash", 3, None)
         assert len(results) == 3
 
     def test_run_id_and_query_hash(self):
-        c = _make_candidate()
-        results = rank_candidates([c], "run_001", "qhash", 5)
+        s = _make_scoring()
+        results = rank_candidates([s], "run_001", "qhash", 5, None)
         assert results[0].retrieval_run_id == "run_001"
         assert results[0].query_hash == "qhash"
+
+    def test_result_has_trace(self):
+        s = _make_scoring()
+        results = rank_candidates([s], "run_001", "qhash", 5, None)
+        assert hasattr(results[0], "trace")
+        assert results[0].trace.document_id == "doc_001"
 
 
 class TestBuildResponse:
     def test_response_fields(self):
-        c = _make_candidate()
-        r = RetrievalResult(
-            rank=1,
-            candidate=c,
-            retrieval_run_id="run_001",
-            query_hash="qhash",
-        )
+        s = _make_scoring()
+        results = rank_candidates([s], "run_001", "qhash", 5, None)
         resp = build_response(
-            results=[r],
+            results=results,
             query="test",
             retrieval_run_id="run_001",
             total_candidates=1,
@@ -153,16 +216,11 @@ class TestBuildResponse:
         assert resp.text_policy.mode == "DUAL_CONTEXT"
 
     def test_response_with_filters(self):
-        c = _make_candidate()
-        r = RetrievalResult(
-            rank=1,
-            candidate=c,
-            retrieval_run_id="run_001",
-            query_hash="qhash",
-        )
+        s = _make_scoring()
+        results = rank_candidates([s], "run_001", "qhash", 5, None)
         f = MetadataFilter(document_id="doc_001")
         resp = build_response(
-            results=[r],
+            results=results,
             query="test",
             retrieval_run_id="run_001",
             total_candidates=1,
@@ -219,7 +277,8 @@ class TestEndToEndTraceability:
         assert c.raw_text == "The enterprise architecture includes hybrid cloud patterns"
         assert c.cleaned_text == "Enterprise architecture includes hybrid cloud patterns"
 
-        t = c.trace
+        # Trace is on RetrievalResult, not CandidateEvidence
+        t = r.trace
         assert t.document_id == "doc_abc123"
         assert t.chunk_id == "chunk_doc_abc123_0"
         assert t.source_path == "docs/knowledge.md"
@@ -256,6 +315,9 @@ class TestEndToEndTraceability:
             assert r["candidate"]["cleaned_text_hash"] == "hash456"
             assert r["retrieval_run_id"] == resp.retrieval_run_id
             assert r["query_hash"] == resp.query_hash
+            # Trace is in result serialization
+            assert "trace" in r
+            assert r["trace"]["document_id"] == "doc_001"
 
     def test_raw_text_not_modified(self):
         original_raw = "Original raw text that must not change"
@@ -304,3 +366,47 @@ class TestEndToEndTraceability:
         assert "reasoning" not in d
         assert "llm" not in d
         assert "generation" not in d
+
+
+class TestTraceOnResultNotCandidate:
+    """Verify trace is on RetrievalResult, not CandidateEvidence."""
+
+    def test_candidate_has_no_trace(self):
+        c = _make_candidate()
+        assert not hasattr(c, "trace")
+
+    def test_result_has_trace(self):
+        s = _make_scoring()
+        results = rank_candidates([s], "run_001", "qhash", 5, None)
+        assert hasattr(results[0], "trace")
+
+    def test_trace_has_score_policy(self):
+        s = _make_scoring(score_policy="token_frequency")
+        results = rank_candidates([s], "run_001", "qhash", 5, None)
+        assert results[0].trace.score_policy == "token_frequency"
+
+    def test_trace_has_source_retrievers(self):
+        s = _make_scoring(source_retrievers=["keyword"])
+        results = rank_candidates([s], "run_001", "qhash", 5, None)
+        assert results[0].trace.source_retrievers == ["keyword"]
+
+    def test_trace_has_applied_filters(self):
+        s = _make_scoring()
+        f = MetadataFilter(document_id="doc_001")
+        results = rank_candidates([s], "run_001", "qhash", 5, f)
+        assert "document_id=doc_001" in results[0].trace.applied_filters
+
+    def test_same_candidate_two_runs_no_stale_trace(self):
+        """Same CandidateEvidence used in two runs — traces are independent."""
+        s = _make_scoring()
+
+        results1 = rank_candidates([s], "run_001", "qhash1", 5, None)
+        results2 = rank_candidates([s], "run_002", "qhash2", 5, None)
+
+        assert results1[0].retrieval_run_id == "run_001"
+        assert results2[0].retrieval_run_id == "run_002"
+        assert results1[0].query_hash == "qhash1"
+        assert results2[0].query_hash == "qhash2"
+
+        # Candidate is unchanged
+        assert s.candidate.raw_text == "Hello world"

@@ -13,6 +13,7 @@ from tracevault.retrieval.models import (
     RetrievalResponse,
     RetrievalResult,
     RetrievalTrace,
+    ScoringCandidate,
     TextRetrievalPolicy,
 )
 
@@ -33,44 +34,58 @@ def compute_cleaned_text_hash(cleaned_text: str) -> str:
 
 
 def build_trace(
-    candidate: CandidateEvidence,
-    retrieval_source: str,
-    matched_fields: list[str],
+    scoring: ScoringCandidate,
     filters: MetadataFilter | None,
 ) -> RetrievalTrace:
-    """Build a RetrievalTrace for a candidate."""
+    """Build a RetrievalTrace from a ScoringCandidate.
+
+    Reads retrieval_source, matched_fields, and source_retrievers
+    from the ScoringCandidate's explicit trace fields — not from
+    mutable candidate.metadata.
+    """
     applied = []
     if filters:
-        applied = describe_filters(filters).split(", ") if describe_filters(filters) else []
+        desc = describe_filters(filters)
+        if desc:
+            applied = desc.split(", ")
 
+    c = scoring.candidate
     return RetrievalTrace(
-        document_id=candidate.document_id,
-        chunk_id=candidate.chunk_id,
-        source_path=candidate.source_path,
-        raw_text_hash=candidate.raw_text_hash,
-        cleaned_text_hash=candidate.cleaned_text_hash,
-        retrieval_source=retrieval_source,
-        matched_fields=matched_fields,
+        document_id=c.document_id,
+        chunk_id=c.chunk_id,
+        source_path=c.source_path,
+        raw_text_hash=c.raw_text_hash,
+        cleaned_text_hash=c.cleaned_text_hash,
+        retrieval_source=scoring.retrieval_source,
+        matched_fields=scoring.matched_fields,
         applied_filters=applied,
+        score_policy=c.score.score_policy,
+        source_retrievers=scoring.source_retrievers,
     )
 
 
 def rank_candidates(
-    candidates: list[CandidateEvidence],
+    candidates: list[ScoringCandidate],
     retrieval_run_id: str,
     query_hash: str,
     top_k: int,
+    filters: MetadataFilter | None,
 ) -> list[RetrievalResult]:
-    """Rank candidates and wrap them in RetrievalResult."""
-    return [
-        RetrievalResult(
-            rank=i + 1,
-            candidate=candidates[i],
-            retrieval_run_id=retrieval_run_id,
-            query_hash=query_hash,
+    """Rank ScoringCandidates and wrap them in RetrievalResult with trace."""
+    results = []
+    for i in range(min(top_k, len(candidates))):
+        s = candidates[i]
+        trace = build_trace(s, filters)
+        results.append(
+            RetrievalResult(
+                rank=i + 1,
+                candidate=s.candidate,
+                retrieval_run_id=retrieval_run_id,
+                query_hash=query_hash,
+                trace=trace,
+            )
         )
-        for i in range(min(top_k, len(candidates)))
-    ]
+    return results
 
 
 def build_response(

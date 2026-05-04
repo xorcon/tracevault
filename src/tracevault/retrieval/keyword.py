@@ -1,7 +1,7 @@
 """In-memory keyword retriever.
 
 Implements keyword-based retrieval over raw_text and/or cleaned_text
-using simple token frequency scoring.
+using token-frequency scoring.
 """
 
 import re
@@ -11,7 +11,7 @@ from tracevault.retrieval.models import (
     CandidateEvidence,
     MetadataFilter,
     RetrievalScore,
-    RetrievalTrace,
+    ScoringCandidate,
     TextRetrievalPolicy,
 )
 from tracevault.retrieval.text_policy import get_search_text
@@ -28,7 +28,7 @@ def _compute_keyword_score(
 ) -> float:
     """Compute a normalized keyword relevance score.
 
-    Uses a simplified BM25-like approach with term frequency saturation.
+    Uses token-frequency with saturation and simple length normalization.
     """
     if not query_tokens or not doc_tokens:
         return 0.0
@@ -40,7 +40,7 @@ def _compute_keyword_score(
     for token in query_tokens:
         freq = doc_counter.get(token, 0)
         if freq > 0:
-            # BM25-like term frequency with saturation
+            # Term frequency with saturation
             tf = (freq * 1.5) / (freq + 0.5)
             score += tf
 
@@ -54,7 +54,8 @@ def _compute_keyword_score(
 class InMemoryKeywordRetriever:
     """In-memory keyword retriever over a corpus of CandidateEvidence.
 
-    Searches over raw_text and/or cleaned_text based on TextRetrievalPolicy.
+    Searches over raw_text and/or cleaned_text based on TextRetrievalPolicy
+    using deterministic token-frequency scoring.
     """
 
     source_type = "keyword"
@@ -72,10 +73,22 @@ class InMemoryKeywordRetriever:
         query: str,
         top_k: int = 5,
         filters: dict | None = None,
-    ) -> list[CandidateEvidence]:
-        """Retrieve candidates using keyword matching."""
+        text_policy: TextRetrievalPolicy | None = None,
+    ) -> list[ScoringCandidate]:
+        """Retrieve candidates using keyword matching.
+
+        Args:
+            query: Search query text.
+            top_k: Maximum number of results to return.
+            filters: Metadata filter criteria.
+            text_policy: Per-request text policy override. If None, uses
+                the retriever's constructor-time default.
+        """
         if not query.strip():
             return []
+
+        # Per-request policy overrides constructor default
+        effective_policy = text_policy or self.text_policy
 
         query_tokens = _tokenize(query)
 
@@ -90,60 +103,53 @@ class InMemoryKeywordRetriever:
             )
 
         # Score each candidate
-        scored = []
+        scored: list[ScoringCandidate] = []
         for candidate in self.corpus:
             # Apply filter
             if metadata_filter and not metadata_filter.matches(candidate):
                 continue
 
-            # Get search text based on policy
-            search_text = get_search_text(candidate, self.text_policy)
+            # Get search text based on effective policy
+            search_text = get_search_text(candidate, effective_policy)
             doc_tokens = _tokenize(search_text)
 
             score = _compute_keyword_score(query_tokens, doc_tokens)
 
             if score > 0:
-                # Determine matched fields
+                # Determine matched fields using effective policy
                 matched_fields = []
-                if self.text_policy.uses_raw():
+                if effective_policy.uses_raw():
                     raw_tokens = _tokenize(candidate.raw_text)
                     if any(t in Counter(raw_tokens) for t in query_tokens):
                         matched_fields.append("raw_text")
-                if self.text_policy.uses_cleaned():
+                if effective_policy.uses_cleaned():
                     cleaned_tokens = _tokenize(candidate.cleaned_text)
                     if any(t in Counter(cleaned_tokens) for t in query_tokens):
                         matched_fields.append("cleaned_text")
 
-                result = CandidateEvidence(
-                    document_id=candidate.document_id,
-                    chunk_id=candidate.chunk_id,
-                    chunk_index=candidate.chunk_index,
-                    source_path=candidate.source_path,
-                    source_type=candidate.source_type,
-                    raw_text=candidate.raw_text,
-                    cleaned_text=candidate.cleaned_text,
-                    raw_text_hash=candidate.raw_text_hash,
-                    cleaned_text_hash=candidate.cleaned_text_hash,
-                    score=RetrievalScore(
-                        keyword_score=score,
-                        vector_score=0.0,
-                        hybrid_score=score,
-                        alpha=0.0,
-                    ),
-                    trace=RetrievalTrace(
-                        document_id=candidate.document_id,
-                        chunk_id=candidate.chunk_id,
-                        source_path=candidate.source_path,
-                        raw_text_hash=candidate.raw_text_hash,
-                        cleaned_text_hash=candidate.cleaned_text_hash,
-                        retrieval_source="keyword",
+                scored.append(
+                    ScoringCandidate(
+                        candidate=candidate,
+                        score=RetrievalScore(
+                            keyword_score=score,
+                            vector_score=0.0,
+                            hybrid_score=score,
+                            alpha=0.0,
+                            score_policy="token_frequency",
+                        ),
                         matched_fields=matched_fields,
-                    ),
-                    metadata=candidate.metadata,
+                        retrieval_source="keyword",
+                        source_retrievers=["keyword"],
+                    )
                 )
-                scored.append(result)
 
         # Sort by keyword_score desc, then document_id asc, chunk_id asc
-        scored.sort(key=lambda c: (-c.score.keyword_score, c.document_id, c.chunk_id))
+        scored.sort(
+            key=lambda s: (
+                -s.score.keyword_score,
+                s.candidate.document_id,
+                s.candidate.chunk_id,
+            )
+        )
 
         return scored[:top_k]

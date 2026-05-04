@@ -195,21 +195,88 @@ class TestDescribeFilters:
     def test_empty_returns_empty(self):
         assert describe_filters(MetadataFilter()) == ""
 
-    def test_single_filter(self):
+    def test_document_id(self):
         f = MetadataFilter(document_id="doc_001")
         assert describe_filters(f) == "document_id=doc_001"
 
-    def test_multiple_filters(self):
+    def test_source_path(self):
+        f = MetadataFilter(source_path="docs/a.md")
+        assert describe_filters(f) == "source_path=docs/a.md"
+
+    def test_source_type(self):
+        f = MetadataFilter(source_type="md")
+        assert describe_filters(f) == "source_type=md"
+
+    def test_key_value(self):
+        f = MetadataFilter(key_value={"env": "prod"})
+        assert describe_filters(f) == "env=prod"
+
+    def test_combined(self):
         f = MetadataFilter(
             document_id="doc_001",
-            source_path="docs/a.md",
             source_type="md",
+            key_value={"env": "prod"},
         )
         desc = describe_filters(f)
         assert "document_id=doc_001" in desc
-        assert "source_path=docs/a.md" in desc
         assert "source_type=md" in desc
+        assert "env=prod" in desc
 
-    def test_key_value_in_description(self):
+
+class TestMetadataFilterToDictFlattening:
+    """Tests that to_dict() flattens key_value for pipeline forwarding."""
+
+    def test_to_dict_flattens_key_value(self):
+        f = MetadataFilter(
+            document_id="doc_001",
+            key_value={"env": "prod", "team": "infra"},
+        )
+        d = f.to_dict()
+        assert d["document_id"] == "doc_001"
+        assert d["env"] == "prod"
+        assert d["team"] == "infra"
+        assert "key_value" not in d
+
+    def test_to_dict_only_key_value(self):
         f = MetadataFilter(key_value={"env": "prod"})
-        assert describe_filters(f) == "env=prod"
+        d = f.to_dict()
+        assert d == {"env": "prod"}
+
+    def test_retriever_can_rebuild_filter_from_flat_dict(self):
+        """Simulate what the retriever does with the flat dict."""
+        f = MetadataFilter(
+            document_id="doc_001",
+            source_path="docs/a.md",
+            key_value={"env": "prod"},
+        )
+        flat = f.to_dict()
+
+        # Rebuild as retriever does
+        rebuilt = MetadataFilter(
+            document_id=flat.get("document_id"),
+            source_path=flat.get("source_path"),
+            source_type=flat.get("source_type"),
+            key_value={k: v for k, v in flat.items() if k not in ("document_id", "source_path", "source_type")},
+        )
+
+        assert rebuilt.document_id == "doc_001"
+        assert rebuilt.source_path == "docs/a.md"
+        assert rebuilt.key_value == {"env": "prod"}
+
+    def test_roundtrip_preserves_key_value(self):
+        """to_dict() then rebuild should preserve key_value filters."""
+        original = MetadataFilter(
+            document_id="doc_001",
+            source_type="md",
+            key_value={"env": "prod", "team": "infra"},
+        )
+        flat = original.to_dict()
+        rebuilt = MetadataFilter(
+            document_id=flat.get("document_id"),
+            source_path=flat.get("source_path"),
+            source_type=flat.get("source_type"),
+            key_value={k: v for k, v in flat.items() if k not in ("document_id", "source_path", "source_type")},
+        )
+        assert rebuilt.document_id == original.document_id
+        assert rebuilt.source_type == original.source_type
+        assert rebuilt.key_value == original.key_value
