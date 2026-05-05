@@ -642,6 +642,111 @@ class TestPackTrace:
         assert result.evidence_pack.trace.pack_run_id == "pack_run_001"
 
 
+class TestBuilderAuditIntegrity:
+    """Builder must always produce EvidencePack with complete, non-degenerate trace."""
+
+    def test_builder_pack_has_non_empty_pack_id(self):
+        scorings = [_make_scoring()]
+        resp = _make_response(scorings)
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        assert result.evidence_pack.trace.pack_id != ""
+        assert len(result.evidence_pack.trace.pack_id) == 64
+
+    def test_builder_pack_has_non_empty_retrieval_run_id(self):
+        scorings = [_make_scoring()]
+        resp = _make_response(scorings)
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        assert result.evidence_pack.trace.retrieval_run_id != ""
+
+    def test_builder_pack_has_non_empty_query_hash(self):
+        scorings = [_make_scoring()]
+        resp = _make_response(scorings)
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        assert result.evidence_pack.trace.query_hash != ""
+        assert len(result.evidence_pack.trace.query_hash) == 64
+
+    def test_builder_pack_has_non_empty_query(self):
+        scorings = [_make_scoring()]
+        resp = _make_response(scorings, query="my query")
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        assert result.evidence_pack.trace.query == "my query"
+
+    def test_builder_pack_trace_has_selection_policy(self):
+        scorings = [_make_scoring()]
+        resp = _make_response(scorings)
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        assert result.evidence_pack.trace.selection_policy.order_by == "retrieval_rank"
+        assert result.evidence_pack.trace.selection_policy.deduplicate_by == "document_chunk"
+
+    def test_builder_pack_trace_has_context_policy(self):
+        scorings = [_make_scoring()]
+        resp = _make_response(scorings)
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        assert result.evidence_pack.trace.context_policy.include_raw_text is True
+        assert result.evidence_pack.trace.context_policy.include_cleaned_text is True
+
+    def test_builder_pack_trace_has_text_policy(self):
+        results = rank_candidates(
+            candidates=[_make_scoring()],
+            retrieval_run_id="run_001",
+            query_hash="qhash",
+            top_k=10,
+            filters=None,
+        )
+        resp = build_response(
+            results=results,
+            query="test",
+            retrieval_run_id="run_001",
+            total_candidates=1,
+            alpha=0.5,
+            text_policy=TextRetrievalPolicy.raw_only(),
+            filters=None,
+        )
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        assert result.evidence_pack.trace.text_policy.mode == "RAW_ONLY"
+
+    def test_builder_pack_trace_serialization_preserves_all_fields(self):
+        """Serialization must preserve the complete trace."""
+        import json
+
+        from tracevault.evidence.serialization import serialize_evidence_pack
+
+        scorings = [_make_scoring()]
+        resp = _make_response(scorings)
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        json_str = serialize_evidence_pack(result.evidence_pack)
+        parsed = json.loads(json_str)
+        trace = parsed["trace"]
+
+        # All critical audit fields present and non-empty
+        assert trace["pack_id"] != ""
+        assert trace["retrieval_run_id"] != ""
+        assert trace["query_hash"] != ""
+        assert trace["query"] != ""
+        assert trace["total_input_results"] >= 0
+        assert trace["total_selected_items"] >= 0
+        assert trace["total_excluded_items"] >= 0
+        assert trace["selection_policy"]["order_by"] == "retrieval_rank"
+        assert trace["context_policy"]["include_raw_text"] is True
+        assert trace["text_policy"] != ""
+
+
 class TestCandidateMetadataPreservation:
     def test_candidate_metadata_copied_not_shared(self):
         c = _make_candidate(metadata={"env": "prod"}, raw_text="Hello world", cleaned_text="Hello world")

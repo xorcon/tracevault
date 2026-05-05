@@ -252,6 +252,15 @@ class EvidencePackTrace:
     applied_filters: list[str] = field(default_factory=list)
     pack_run_id: str = ""
 
+    def __post_init__(self):
+        """Reject degenerate traces — audit fields must be non-empty."""
+        if not self.pack_id:
+            raise ValueError("EvidencePackTrace.pack_id must not be empty")
+        if not self.retrieval_run_id:
+            raise ValueError("EvidencePackTrace.retrieval_run_id must not be empty")
+        if not self.query_hash:
+            raise ValueError("EvidencePackTrace.query_hash must not be empty")
+
     def to_dict(self) -> dict:
         return {
             "pack_id": self.pack_id,
@@ -303,10 +312,10 @@ class EvidencePack:
         trace: Full audit trail
     """
 
+    trace: EvidencePackTrace
     items: list[EvidenceItem] = field(default_factory=list)
     groups: list[EvidenceGroup] = field(default_factory=list)
     context: str = ""
-    trace: EvidencePackTrace = field(default_factory=EvidencePackTrace)
 
     def to_dict(self) -> dict:
         return {

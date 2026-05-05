@@ -354,6 +354,81 @@ class TestEvidencePack:
         assert "llm" not in d
         assert "hallucination" not in d
 
+    def test_evidence_pack_requires_explicit_trace(self):
+        """EvidencePack must not allow construction without an explicit trace."""
+        with pytest.raises(TypeError, match="missing"):
+            EvidencePack()
+
+    def test_evidence_pack_requires_trace_with_items_only(self):
+        """Even with items, EvidencePack requires an explicit trace."""
+        item = EvidenceItem(
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            chunk_index=0,
+            source_path="docs/test.md",
+            source_type="md",
+            raw_text="Hello",
+            cleaned_text="Hello",
+            raw_text_hash="abc",
+        )
+        with pytest.raises(TypeError, match="missing"):
+            EvidencePack(items=[item])
+
+
+class TestEvidencePackTraceValidation:
+    """EvidencePackTrace must reject degenerate (empty) audit fields."""
+
+    def test_rejects_empty_pack_id(self):
+        with pytest.raises(ValueError, match="pack_id"):
+            EvidencePackTrace(
+                pack_id="",
+                retrieval_run_id="run_001",
+                query="test",
+                query_hash="qhash",
+                total_input_results=0,
+                total_selected_items=0,
+                total_excluded_items=0,
+            )
+
+    def test_rejects_empty_retrieval_run_id(self):
+        with pytest.raises(ValueError, match="retrieval_run_id"):
+            EvidencePackTrace(
+                pack_id="pack_001",
+                retrieval_run_id="",
+                query="test",
+                query_hash="qhash",
+                total_input_results=0,
+                total_selected_items=0,
+                total_excluded_items=0,
+            )
+
+    def test_rejects_empty_query_hash(self):
+        with pytest.raises(ValueError, match="query_hash"):
+            EvidencePackTrace(
+                pack_id="pack_001",
+                retrieval_run_id="run_001",
+                query="test",
+                query_hash="",
+                total_input_results=0,
+                total_selected_items=0,
+                total_excluded_items=0,
+            )
+
+    def test_accepts_valid_trace(self):
+        """A trace with all required fields should not raise."""
+        trace = EvidencePackTrace(
+            pack_id="pack_001",
+            retrieval_run_id="run_001",
+            query="test",
+            query_hash="qhash",
+            total_input_results=1,
+            total_selected_items=1,
+            total_excluded_items=0,
+        )
+        assert trace.pack_id == "pack_001"
+        assert trace.retrieval_run_id == "run_001"
+        assert trace.query_hash == "qhash"
+
 
 class TestEvidencePackRequest:
     def test_request_fields(self):
