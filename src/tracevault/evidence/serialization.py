@@ -111,6 +111,7 @@ def deserialize_evidence_pack_trace(d: dict) -> EvidencePackTrace:
             chunk_id=e.get("chunk_id", ""),
             reason=e.get("reason", ""),
             budget_field=e.get("budget_field", ""),
+            detail=e.get("detail", ""),
         )
         for e in d.get("exclusions", [])
     ]
@@ -134,6 +135,6 @@ def deserialize_evidence_pack_trace(d: dict) -> EvidencePackTrace:
         ),
         budget=budget,
         text_policy=TextRetrievalPolicy(mode=d.get("text_policy", "DUAL_CONTEXT")),
-        applied_filters=d.get("applied_filters", []),
+        applied_filters=d.get("applied_filters", ""),
         pack_run_id=d.get("pack_run_id", ""),
     )

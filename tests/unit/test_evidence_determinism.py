@@ -5,6 +5,7 @@ Same input and same policies must produce the same EvidencePack.
 
 from tracevault.evidence.builder import InMemoryEvidencePackBuilder
 from tracevault.evidence.models import (
+    ContextAssemblyPolicy,
     EvidenceBudget,
     EvidencePackRequest,
     EvidenceSelectionPolicy,
@@ -113,6 +114,39 @@ class TestDeterministicOrdering:
         ids1 = [i.chunk_id for i in r1.evidence_pack.items]
         ids2 = [i.chunk_id for i in r2.evidence_pack.items]
         assert ids1 == ids2
+
+
+class TestOrderSensitivePackId:
+    """pack_id must change when final evidence order changes."""
+
+    def test_pack_id_changes_when_order_changes(self):
+        """Same selected items in different order must produce different pack_id."""
+        from tracevault.evidence.models import compute_pack_id
+
+        sel = EvidenceSelectionPolicy()
+        ctx = ContextAssemblyPolicy()
+
+        # Same items, different order
+        order_a = [("doc_001", "chunk_001"), ("doc_002", "chunk_002")]
+        order_b = [("doc_002", "chunk_002"), ("doc_001", "chunk_001")]
+
+        id_a = compute_pack_id("run_001", "qhash", order_a, sel, ctx, None)
+        id_b = compute_pack_id("run_001", "qhash", order_b, sel, ctx, None)
+
+        assert id_a != id_b, "pack_id must differ when item order differs"
+
+    def test_pack_id_same_when_order_same(self):
+        """Same items in same order must produce same pack_id."""
+        from tracevault.evidence.models import compute_pack_id
+
+        sel = EvidenceSelectionPolicy()
+        ctx = ContextAssemblyPolicy()
+        order = [("doc_001", "chunk_001"), ("doc_002", "chunk_002")]
+
+        id_a = compute_pack_id("run_001", "qhash", order, sel, ctx, None)
+        id_b = compute_pack_id("run_001", "qhash", order, sel, ctx, None)
+
+        assert id_a == id_b
 
 
 class TestDeterministicDedup:

@@ -39,6 +39,8 @@ class EvidenceExclusionReason:
     MAX_RAW_CHARS_EXCEEDED: Literal["max_raw_chars_exceeded"] = "max_raw_chars_exceeded"
     MAX_CLEANED_CHARS_EXCEEDED: Literal["max_cleaned_chars_exceeded"] = "max_cleaned_chars_exceeded"
     MAX_CONTEXT_CHARS_EXCEEDED: Literal["max_context_chars_exceeded"] = "max_context_chars_exceeded"
+    DUPLICATE_DOCUMENT_CHUNK: Literal["duplicate_document_chunk"] = "duplicate_document_chunk"
+    DUPLICATE_RAW_TEXT_HASH: Literal["duplicate_raw_text_hash"] = "duplicate_raw_text_hash"
 
 
 @dataclass(frozen=True)
@@ -113,13 +115,15 @@ class EvidenceExclusion:
         document_id: The excluded item's document_id
         chunk_id: The excluded item's chunk_id
         reason: Mechanical exclusion reason code
-        budget_field: Which budget field triggered the exclusion
+        budget_field: Which budget field triggered the exclusion (for budget reasons)
+        detail: Optional detail identifying the earlier selected duplicate
     """
 
     document_id: str
     chunk_id: str
     reason: str
     budget_field: str = ""
+    detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -233,7 +237,7 @@ class EvidencePackTrace:
         context_policy: The ContextAssemblyPolicy used
         budget: The EvidenceBudget used
         text_policy: TextRetrievalPolicy from the retrieval response
-        applied_filters: Applied filters from the retrieval response
+        applied_filters: Verbatim applied_filters string from RetrievalResponse
         pack_run_id: Optional run identifier injected by the caller
     """
 
@@ -249,7 +253,7 @@ class EvidencePackTrace:
     context_policy: ContextAssemblyPolicy = field(default_factory=ContextAssemblyPolicy)
     budget: EvidenceBudget | None = None
     text_policy: TextRetrievalPolicy = field(default_factory=TextRetrievalPolicy.dual_context)
-    applied_filters: list[str] = field(default_factory=list)
+    applied_filters: str = ""
     pack_run_id: str = ""
 
     def __post_init__(self):
@@ -276,6 +280,7 @@ class EvidencePackTrace:
                     "chunk_id": e.chunk_id,
                     "reason": e.reason,
                     "budget_field": e.budget_field,
+                    "detail": e.detail,
                 }
                 for e in self.exclusions
             ],
@@ -377,17 +382,19 @@ def compute_pack_id(
     context_policy: ContextAssemblyPolicy,
     budget: EvidenceBudget | None,
 ) -> str:
-    """Compute a deterministic pack_id from input and policy.
+    """Compute a deterministic, order-sensitive pack_id from input and policy.
 
-    pack_id = sha256(retrieval_run_id + query_hash + sorted item identities
+    pack_id = sha256(retrieval_run_id + query_hash + ordered item identities
                     + selection_policy_hash + context_policy_hash + budget_hash)
+
+    item_identities must be in final pack order (retrieval_rank order).
     """
     parts = [
         retrieval_run_id,
         query_hash,
     ]
-    # Sort item identities for determinism
-    for doc_id, chunk_id in sorted(item_identities):
+    # Hash in final pack order — order matters
+    for doc_id, chunk_id in item_identities:
         parts.append(f"{doc_id}:{chunk_id}")
     parts.append(_compute_policy_hash(selection_policy))
     parts.append(_compute_policy_hash(context_policy))

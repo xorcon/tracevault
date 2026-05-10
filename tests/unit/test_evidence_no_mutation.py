@@ -311,3 +311,20 @@ class TestEvidenceItemIsolation:
 
         result.evidence_pack.items[0].candidate_metadata["new_key"] = "new_value"
         assert resp.results[0].candidate.metadata == original_meta
+
+    def test_nested_candidate_metadata_is_deep_copied(self):
+        """Nested dicts/lists in candidate_metadata must be deep-copied."""
+        nested_meta = {"env": "prod", "tags": ["a", "b"], "config": {"key": "val"}}
+        s = _make_scoring(metadata=nested_meta)
+        resp = _make_response([s])
+
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        # Mutate nested structures in the evidence item
+        result.evidence_pack.items[0].candidate_metadata["tags"].append("c")
+        result.evidence_pack.items[0].candidate_metadata["config"]["key"] = "mutated"
+
+        # Original must be unchanged
+        assert resp.results[0].candidate.metadata["tags"] == ["a", "b"]
+        assert resp.results[0].candidate.metadata["config"]["key"] == "val"

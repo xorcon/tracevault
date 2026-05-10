@@ -560,10 +560,10 @@ class TestEvidencePackTrace:
             total_input_results=1,
             total_selected_items=1,
             total_excluded_items=0,
-            applied_filters=["document_id=doc_001"],
+            applied_filters="document_id=doc_001",
         )
         d = trace.to_dict()
-        assert d["applied_filters"] == ["document_id=doc_001"]
+        assert d["applied_filters"] == "document_id=doc_001"
 
     def test_trace_preserves_pack_run_id(self):
         trace = EvidencePackTrace(

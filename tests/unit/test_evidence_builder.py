@@ -395,6 +395,84 @@ class TestOrdering:
         assert ranks == sorted(ranks)
 
 
+class TestDuplicateExclusion:
+    """Duplicate exclusions must be recorded, not silently dropped."""
+
+    def test_duplicate_document_chunk_exclusion_recorded(self):
+        """Same (document_id, chunk_id) should produce a duplicate exclusion."""
+        s1 = _make_scoring(chunk_id="chunk_001", keyword_score=0.9)
+        s2 = _make_scoring(chunk_id="chunk_001", keyword_score=0.7)
+        resp = _make_response([s1, s2])
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        assert len(result.evidence_pack.items) == 1
+        assert result.evidence_pack.trace.total_excluded_items == 1
+        exc = result.evidence_pack.trace.exclusions[0]
+        assert exc.reason == "duplicate_document_chunk"
+        assert exc.document_id == "doc_001"
+        assert exc.chunk_id == "chunk_001"
+        assert "duplicate" in exc.detail.lower()
+
+    def test_duplicate_raw_text_hash_exclusion_recorded(self):
+        """Same raw_text_hash should produce a duplicate_raw_text_hash exclusion."""
+        c1 = _make_candidate(chunk_id="chunk_001", raw_text_hash="same_hash", raw_text="Hello", cleaned_text="Hello")
+        c2 = _make_candidate(chunk_id="chunk_002", raw_text_hash="same_hash", raw_text="Hello", cleaned_text="Hello")
+        s1 = ScoringCandidate(
+            candidate=c1,
+            score=RetrievalScore(keyword_score=0.9, hybrid_score=0.9, score_policy="keyword"),
+            matched_fields=["raw_text"],
+            retrieval_source="keyword",
+            source_retrievers=["keyword"],
+        )
+        s2 = ScoringCandidate(
+            candidate=c2,
+            score=RetrievalScore(keyword_score=0.7, hybrid_score=0.7, score_policy="keyword"),
+            matched_fields=["raw_text"],
+            retrieval_source="keyword",
+            source_retrievers=["keyword"],
+        )
+        resp = _make_response([s1, s2])
+        builder = InMemoryEvidencePackBuilder()
+        sel = EvidenceSelectionPolicy(deduplicate_by="raw_text_hash")
+        result = builder.build(EvidencePackRequest(retrieval_response=resp, selection_policy=sel))
+
+        assert len(result.evidence_pack.items) == 1
+        assert result.evidence_pack.trace.total_excluded_items == 1
+        exc = result.evidence_pack.trace.exclusions[0]
+        assert exc.reason == "duplicate_raw_text_hash"
+        assert "same_hash" in exc.detail
+
+    def test_total_excluded_items_includes_duplicates(self):
+        """total_excluded_items must include duplicate exclusions."""
+        s1 = _make_scoring(chunk_id="chunk_001", keyword_score=0.9)
+        s2 = _make_scoring(chunk_id="chunk_001", keyword_score=0.7)
+        s3 = _make_scoring(chunk_id="chunk_002", keyword_score=0.5)
+        resp = _make_response([s1, s2, s3])
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        assert len(result.evidence_pack.items) == 2
+        assert result.evidence_pack.trace.total_excluded_items == 1
+
+    def test_total_excluded_items_includes_duplicates_and_budget(self):
+        """total_excluded_items must include both duplicate and budget exclusions."""
+        s1 = _make_scoring(chunk_id="chunk_001", keyword_score=0.9)
+        s2 = _make_scoring(chunk_id="chunk_001", keyword_score=0.7)  # duplicate
+        s3 = _make_scoring(chunk_id="chunk_002", keyword_score=0.5)
+        resp = _make_response([s1, s2, s3])
+        builder = InMemoryEvidencePackBuilder()
+        budget = EvidenceBudget(max_items=1)
+        result = builder.build(EvidencePackRequest(retrieval_response=resp, budget=budget))
+
+        assert len(result.evidence_pack.items) == 1
+        # 1 duplicate + 1 budget = 2 total exclusions
+        assert result.evidence_pack.trace.total_excluded_items == 2
+        reasons = [e.reason for e in result.evidence_pack.trace.exclusions]
+        assert "duplicate_document_chunk" in reasons
+        assert "max_items_exceeded" in reasons
+
+
 class TestBudgetExclusion:
     def test_max_items_exclusion(self):
         scorings = [
@@ -629,6 +707,7 @@ class TestPackTrace:
         builder = InMemoryEvidencePackBuilder()
         result = builder.build(EvidencePackRequest(retrieval_response=resp))
 
+        # applied_filters is preserved verbatim as a string
         assert "document_id=doc_001" in result.evidence_pack.trace.applied_filters
 
     def test_trace_preserves_pack_run_id(self):

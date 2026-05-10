@@ -9,6 +9,8 @@ Transforms RetrievalResponse into EvidencePack with:
 - No mutation of input RetrievalResponse
 """
 
+import copy
+
 from tracevault.evidence.audit import build_trace
 from tracevault.evidence.models import (
     ContextAssemblyPolicy,
@@ -62,7 +64,7 @@ def _result_to_evidence_item(result, response) -> EvidenceItem:
         rank=result.rank,
         text_policy=response.text_policy,
         applied_filters=list(t.applied_filters),
-        candidate_metadata=dict(c.metadata),
+        candidate_metadata=copy.deepcopy(c.metadata),
     )
 
 
@@ -227,19 +229,39 @@ class InMemoryEvidencePackBuilder:
         if selection.order_by == "retrieval_rank":
             all_items.sort(key=lambda i: i.rank)
 
-        # Step 3: Deduplicate
+        # Step 3: Deduplicate — record exclusions for dropped duplicates
         seen: set[tuple] = set()
         deduped: list[EvidenceItem] = []
+        duplicate_exclusions: list[EvidenceExclusion] = []
         for item in all_items:
             key = _dedup_key(item, selection)
             if key not in seen:
                 seen.add(key)
                 deduped.append(item)
+            else:
+                # Record duplicate exclusion
+                if selection.deduplicate_by == "document_chunk":
+                    reason = EvidenceExclusionReason.DUPLICATE_DOCUMENT_CHUNK
+                    detail = f"duplicate of (document_id={item.document_id}, chunk_id={item.chunk_id})"
+                else:
+                    reason = EvidenceExclusionReason.DUPLICATE_RAW_TEXT_HASH
+                    detail = f"duplicate of raw_text_hash={item.raw_text_hash}"
+                duplicate_exclusions.append(
+                    EvidenceExclusion(
+                        document_id=item.document_id,
+                        chunk_id=item.chunk_id,
+                        reason=reason,
+                        detail=detail,
+                    )
+                )
 
         # Step 4: Apply budget
-        selected, exclusions = _apply_budget(deduped, budget or EvidenceBudget(), context)
+        selected, budget_exclusions = _apply_budget(deduped, budget or EvidenceBudget(), context)
 
-        # Step 5: Compute deterministic pack_id
+        # Combine all exclusions: duplicates first, then budget
+        all_exclusions = duplicate_exclusions + budget_exclusions
+
+        # Step 5: Compute deterministic pack_id (order-sensitive)
         item_identities = [(i.document_id, i.chunk_id) for i in selected]
         pack_id = compute_pack_id(
             retrieval_run_id=response.retrieval_run_id,
@@ -256,11 +278,7 @@ class InMemoryEvidencePackBuilder:
         # Step 7: Build groups (single "all" group by default)
         groups = [EvidenceGroup(group_name="all", items=selected)] if selected else []
 
-        # Step 8: Build trace
-        applied_filters_list = []
-        if response.applied_filters:
-            applied_filters_list = response.applied_filters.split(", ")
-
+        # Step 8: Build trace — applied_filters preserved verbatim
         trace = build_trace(
             pack_id=pack_id,
             retrieval_run_id=response.retrieval_run_id,
@@ -268,13 +286,13 @@ class InMemoryEvidencePackBuilder:
             query_hash=response.query_hash,
             total_input_results=len(response.results),
             total_selected_items=len(selected),
-            total_excluded_items=len(exclusions),
-            exclusions=exclusions,
+            total_excluded_items=len(all_exclusions),
+            exclusions=all_exclusions,
             selection_policy=selection,
             context_policy=context,
             budget=budget,
             text_policy=response.text_policy,
-            applied_filters=applied_filters_list,
+            applied_filters=response.applied_filters,
             pack_run_id=request.pack_run_id,
         )
 

@@ -18,6 +18,7 @@ from tracevault.retrieval.audit import build_response, rank_candidates
 from tracevault.retrieval.models import (
     CandidateEvidence,
     MetadataFilter,
+    RetrievalResponse,
     RetrievalScore,
     ScoringCandidate,
     TextRetrievalPolicy,
@@ -238,7 +239,54 @@ class TestSerializeEvidencePack:
 
         json_str = serialize_evidence_pack(result.evidence_pack)
         parsed = __import__("json").loads(json_str)
+        # applied_filters is preserved verbatim as a string
         assert "document_id=doc_001" in parsed["trace"]["applied_filters"]
+
+    def test_applied_filters_with_comma_space_preserved_verbatim(self):
+        """applied_filters containing ', ' must be preserved exactly, not split."""
+        import json
+
+        from tracevault.retrieval.audit import build_response as br
+
+        s = _make_scoring()
+        results = rank_candidates(
+            candidates=[s],
+            retrieval_run_id="run_001",
+            query_hash="qhash",
+            top_k=10,
+            filters=None,
+        )
+        # Simulate applied_filters containing ", " in a value
+        resp = br(
+            results=results,
+            query="test",
+            retrieval_run_id="run_001",
+            total_candidates=1,
+            alpha=0.5,
+            text_policy=TextRetrievalPolicy.dual_context(),
+            filters=None,
+        )
+        # Manually set applied_filters to contain ", "
+        resp = RetrievalResponse(
+            retrieval_run_id=resp.retrieval_run_id,
+            query=resp.query,
+            query_hash=resp.query_hash,
+            results=resp.results,
+            total_candidates=resp.total_candidates,
+            alpha=resp.alpha,
+            text_policy=resp.text_policy,
+            applied_filters="source_type=md, txt, source_path=docs/test.md",
+        )
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        # Trace must preserve the string verbatim
+        assert result.evidence_pack.trace.applied_filters == "source_type=md, txt, source_path=docs/test.md"
+
+        # Serialization must also preserve it verbatim
+        json_str = serialize_evidence_pack(result.evidence_pack)
+        parsed = json.loads(json_str)
+        assert parsed["trace"]["applied_filters"] == "source_type=md, txt, source_path=docs/test.md"
 
 
 class TestSerializeResponse:
@@ -368,7 +416,7 @@ class TestDeserializeTrace:
             "context_policy": {"include_raw_text": True, "include_cleaned_text": True},
             "budget": {"max_items": 5, "max_raw_chars": None, "max_cleaned_chars": None, "max_context_chars": None},
             "text_policy": "DUAL_CONTEXT",
-            "applied_filters": [],
+            "applied_filters": "",
             "pack_run_id": "",
         })
         assert trace.budget.max_items == 5
@@ -387,7 +435,7 @@ class TestDeserializeTrace:
             "context_policy": {"include_raw_text": True, "include_cleaned_text": True},
             "budget": None,
             "text_policy": "DUAL_CONTEXT",
-            "applied_filters": [],
+            "applied_filters": "",
             "pack_run_id": "",
         })
         assert trace.budget is None

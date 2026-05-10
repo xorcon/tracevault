@@ -291,6 +291,7 @@ class TestTraceLevelTraceability:
         filt = MetadataFilter(document_id="doc_001")
         resp = _make_response([s], filters=filt)
         result = InMemoryEvidencePackBuilder().build(EvidencePackRequest(retrieval_response=resp))
+        # applied_filters is preserved verbatim as a string
         assert "document_id=doc_001" in result.evidence_pack.trace.applied_filters
 
 

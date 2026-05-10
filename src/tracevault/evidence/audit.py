@@ -23,7 +23,7 @@ def build_trace(
     context_policy: ContextAssemblyPolicy,
     budget: EvidenceBudget | None,
     text_policy: TextRetrievalPolicy,
-    applied_filters: list[str],
+    applied_filters: str,
     pack_run_id: str = "",
 ) -> EvidencePackTrace:
     """Build an EvidencePackTrace from builder parameters."""
@@ -40,6 +40,6 @@ def build_trace(
         context_policy=context_policy,
         budget=budget,
         text_policy=text_policy,
-        applied_filters=list(applied_filters),
+        applied_filters=applied_filters,
         pack_run_id=pack_run_id,
     )
