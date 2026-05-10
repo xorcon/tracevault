@@ -288,6 +288,39 @@ class TestSerializeEvidencePack:
         parsed = json.loads(json_str)
         assert parsed["trace"]["applied_filters"] == "source_type=md, txt, source_path=docs/test.md"
 
+    def test_evidence_item_applied_filters_comma_space_serialized(self):
+        """Regression: EvidenceItem.applied_filters with ', ' values must serialize intact."""
+        import json
+
+        s = _make_scoring()
+        filt = MetadataFilter(key_value={"project": "Alpha, Beta"})
+        results = rank_candidates(
+            candidates=[s],
+            retrieval_run_id="run_001",
+            query_hash="qhash",
+            top_k=10,
+            filters=filt,
+        )
+        resp = build_response(
+            results=results,
+            query="test",
+            retrieval_run_id="run_001",
+            total_candidates=1,
+            alpha=0.5,
+            text_policy=TextRetrievalPolicy.dual_context(),
+            filters=filt,
+        )
+        builder = InMemoryEvidencePackBuilder()
+        result = builder.build(EvidencePackRequest(retrieval_response=resp))
+
+        # EvidenceItem.applied_filters must be exactly one entry
+        assert result.evidence_pack.items[0].applied_filters == ["project=Alpha, Beta"]
+
+        # Serialization must preserve it
+        json_str = serialize_evidence_pack(result.evidence_pack)
+        parsed = json.loads(json_str)
+        assert parsed["items"][0]["applied_filters"] == ["project=Alpha, Beta"]
+
 
 class TestSerializeResponse:
     def test_serialize_response_produces_valid_json(self):

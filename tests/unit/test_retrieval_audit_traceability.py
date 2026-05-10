@@ -158,6 +158,39 @@ class TestBuildTrace:
         trace = build_trace(s, f)
         assert "document_id=doc_001" in trace.applied_filters
 
+    def test_trace_with_comma_space_in_filter_value(self):
+        """Regression: filter values containing ', ' must not be split."""
+        s = _make_scoring(
+            retrieval_source="keyword",
+            matched_fields=["raw_text"],
+            source_retrievers=["keyword"],
+            score_policy="token_frequency",
+        )
+        # Filter value contains ", " which used to cause split corruption
+        f = MetadataFilter(key_value={"project": "Alpha, Beta"})
+        trace = build_trace(s, f)
+        # Should be exactly one entry, not split into ["project=Alpha", "Beta"]
+        assert trace.applied_filters == ["project=Alpha, Beta"]
+
+    def test_trace_with_multiple_filters_including_comma_space(self):
+        """Regression: multiple filters with comma-space values preserved intact."""
+        s = _make_scoring(
+            retrieval_source="hybrid",
+            matched_fields=["raw_text"],
+            source_retrievers=["keyword"],
+            score_policy="hybrid",
+        )
+        f = MetadataFilter(
+            document_id="doc_001",
+            key_value={"project": "Alpha, Beta", "env": "prod, staging"}
+        )
+        trace = build_trace(s, f)
+        # Each filter should be intact, not split
+        assert len(trace.applied_filters) == 3
+        assert "document_id=doc_001" in trace.applied_filters
+        assert "project=Alpha, Beta" in trace.applied_filters
+        assert "env=prod, staging" in trace.applied_filters
+
     def test_trace_without_filters(self):
         s = _make_scoring(
             retrieval_source="keyword",

@@ -224,6 +224,33 @@ class TestTraceabilityFields:
         result = InMemoryEvidencePackBuilder().build(EvidencePackRequest(retrieval_response=resp))
         assert "document_id=doc_001" in result.evidence_pack.items[0].applied_filters
 
+    def test_applied_filters_comma_space_preserved(self):
+        """Regression: filter values with ', ' must not be split in EvidenceItem."""
+        s = _make_scoring_full()
+        # Filter value contains ", " which used to cause split corruption in RetrievalTrace
+        filt = MetadataFilter(key_value={"project": "Alpha, Beta"})
+        resp = _make_response([s], filters=filt)
+        result = InMemoryEvidencePackBuilder().build(EvidencePackRequest(retrieval_response=resp))
+        # EvidenceItem.applied_filters comes from RetrievalResult.trace.applied_filters
+        # Must be exactly one entry, not split into ["project=Alpha", "Beta"]
+        assert result.evidence_pack.items[0].applied_filters == ["project=Alpha, Beta"]
+
+    def test_applied_filters_multiple_with_comma_space(self):
+        """Regression: multiple filters with comma-space values preserved in EvidenceItem."""
+        s = _make_scoring_full()
+        filt = MetadataFilter(
+            document_id="doc_001",
+            key_value={"project": "Alpha, Beta", "env": "prod, staging"}
+        )
+        resp = _make_response([s], filters=filt)
+        result = InMemoryEvidencePackBuilder().build(EvidencePackRequest(retrieval_response=resp))
+        item = result.evidence_pack.items[0]
+        # Each filter should be intact
+        assert len(item.applied_filters) == 3
+        assert "document_id=doc_001" in item.applied_filters
+        assert "project=Alpha, Beta" in item.applied_filters
+        assert "env=prod, staging" in item.applied_filters
+
     def test_candidate_metadata_preserved(self):
         s = _make_scoring_full(metadata={"env": "prod", "team": "infra"})
         resp = _make_response([s])
