@@ -268,6 +268,29 @@ class TestIngestCLI:
         assert result.returncode == 0
         assert custom_manifest.exists()
 
+    def test_ingest_default_manifest_path_isolated_cwd(self, tmp_path):
+        """Default manifest path is created under isolated subprocess cwd."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Hello default manifest", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tracevault",
+                "ingest",
+                "--json",
+                str(test_file),
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert data["status"] == "new"
+        assert (tmp_path / ".tracevault" / "ingest-manifest.json").exists()
+
     def test_ingest_single_file_error_exits_1(self, tmp_path):
         """Single file with error status exits 1."""
         test_file = tmp_path / "error.txt"
