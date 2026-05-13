@@ -57,10 +57,14 @@ def filter_by_metadata(
     return [c for c in candidates if c.metadata.get(key) == value]
 
 
-def describe_filters(filters: MetadataFilter | None) -> str:
-    """Return a human-readable description of applied filters."""
+def describe_filters_list(filters: MetadataFilter | None) -> list[str]:
+    """Return a list of filter descriptions.
+
+    Each filter is represented as a single string "key=value".
+    This avoids lossy parsing when values contain ", ".
+    """
     if filters is None or filters.is_empty():
-        return ""
+        return []
     parts = []
     if filters.document_id is not None:
         parts.append(f"document_id={filters.document_id}")
@@ -70,4 +74,13 @@ def describe_filters(filters: MetadataFilter | None) -> str:
         parts.append(f"source_type={filters.source_type}")
     for key, value in filters.key_value.items():
         parts.append(f"{key}={value}")
-    return ", ".join(parts)
+    return parts
+
+
+def describe_filters(filters: MetadataFilter | None) -> str:
+    """Return a human-readable description of applied filters.
+
+    Filters are joined with ", ". Use describe_filters_list() when
+    you need to preserve individual filter entries (e.g., for audit traces).
+    """
+    return ", ".join(describe_filters_list(filters))

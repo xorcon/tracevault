@@ -19,6 +19,7 @@ from tracevault.retrieval.audit import (
 from tracevault.retrieval.filters import (
     apply_filters,
     describe_filters,
+    describe_filters_list,
     filter_by_document_id,
     filter_by_metadata,
     filter_by_source_path,
@@ -76,6 +77,7 @@ __all__ = [
     # Filters
     "apply_filters",
     "describe_filters",
+    "describe_filters_list",
     "filter_by_document_id",
     "filter_by_metadata",
     "filter_by_source_path",

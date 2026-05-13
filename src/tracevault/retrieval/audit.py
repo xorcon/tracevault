@@ -6,7 +6,7 @@ Generates and attaches audit metadata to retrieval results.
 import hashlib
 import uuid
 
-from tracevault.retrieval.filters import describe_filters
+from tracevault.retrieval.filters import describe_filters, describe_filters_list
 from tracevault.retrieval.models import (
     MetadataFilter,
     RetrievalResponse,
@@ -42,11 +42,7 @@ def build_trace(
     from the ScoringCandidate's explicit trace fields — not from
     mutable candidate.metadata.
     """
-    applied = []
-    if filters:
-        desc = describe_filters(filters)
-        if desc:
-            applied = desc.split(", ")
+    applied = describe_filters_list(filters)
 
     c = scoring.candidate
     return RetrievalTrace(
