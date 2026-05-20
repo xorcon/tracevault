@@ -2,8 +2,11 @@
 
 from pathlib import Path
 
+import pytest
+
 from tracevault.wiki.exporter import (
     build_note_filename,
+    encode_note_id_for_filename,
     export_note,
     export_notes,
 )
@@ -62,10 +65,10 @@ class TestExportNoteNonDestructive:
         assert result.written is True
         assert result.skipped is False
         assert result.rejected is False
-        assert (tmp_path / "test-note-note-001.md").exists()
+        assert (tmp_path / "test-note--id-note_001.md").exists()
 
     def test_skips_existing_file(self, tmp_path: Path):
-        existing = tmp_path / "existing-note-001.md"
+        existing = tmp_path / "existing--id-note_001.md"
         existing.write_text("existing content")
         note = _make_validated_note(title="Existing")
         result = export_note(note, tmp_path, strict=False)
@@ -76,7 +79,7 @@ class TestExportNoteNonDestructive:
         assert existing.read_text() == "existing content"
 
     def test_overwrites_with_allow_overwrite(self, tmp_path: Path):
-        existing = tmp_path / "existing-note-001.md"
+        existing = tmp_path / "existing--id-note_001.md"
         existing.write_text("old content")
         note = _make_validated_note(title="Existing")
         result = export_note(note, tmp_path, allow_overwrite=True)
@@ -88,7 +91,7 @@ class TestExportNoteNonDestructive:
         note = _make_validated_note()
         result = export_note(note, tmp_path / "deep" / "nested", strict=False)
         assert result.written is True
-        assert (tmp_path / "deep" / "nested" / "test-note-note-001.md").exists()
+        assert (tmp_path / "deep" / "nested" / "test-note--id-note_001.md").exists()
 
 
 class TestExportNoteValidationGated:
@@ -186,7 +189,7 @@ class TestExportNoteStrictUnsupported:
         )
         result = export_note(note, tmp_path)
         assert result.rejected is True
-        assert not (tmp_path / "bad-note-note-001.md").exists()
+        assert not (tmp_path / "bad-note--id-note_001.md").exists()
 
 
 class TestExportNoteClaimEvidenceContract:
@@ -231,7 +234,7 @@ class TestExportResultSemantics:
 
     def test_skipped_not_rejected(self, tmp_path: Path):
         """Existing file without overwrite => skipped=True, rejected=False."""
-        existing = tmp_path / "existing-note-001.md"
+        existing = tmp_path / "existing--id-note_001.md"
         existing.write_text("existing content")
         note = _make_validated_note(title="Existing")
         result = export_note(note, tmp_path, strict=False)
@@ -280,12 +283,12 @@ class TestExportNoteOutput:
         note = _make_validated_note()
         result = export_note(note, tmp_path)
         assert "test-note" in result.file_path
-        assert "note-001" in result.file_path
+        assert "note_001" in result.file_path
 
     def test_file_content_matches_markdown(self, tmp_path: Path):
         note = _make_validated_note()
         result = export_note(note, tmp_path)
-        file_content = (tmp_path / "test-note-note-001.md").read_text(
+        file_content = (tmp_path / "test-note--id-note_001.md").read_text(
             encoding="utf-8"
         )
         assert file_content == result.markdown
@@ -387,7 +390,7 @@ class TestExportNoteIdConsistency:
         assert result.written is False
         assert result.skipped is False
         assert "note_id mismatch" in result.reason
-        assert not (tmp_path / "mismatch-note-a.md").exists()
+        assert not (tmp_path / "mismatch--id-note_a.md").exists()
 
     def test_matching_note_id_exports_successfully(self, tmp_path: Path):
         """note.note_id == metadata.note_id => writes file."""
@@ -488,27 +491,27 @@ class TestBuildNoteFilename:
 
     def test_normal_title(self):
         note = WikiNote(note_id="note_001", title="AI Governance")
-        assert build_note_filename(note) == "ai-governance-note-001.md"
+        assert build_note_filename(note) == "ai-governance--id-note_001.md"
 
     def test_title_slug_only(self):
         """Special characters in title get normalized."""
         note = WikiNote(note_id="note_001", title="Hello! World?")
-        assert build_note_filename(note) == "hello-world-note-001.md"
+        assert build_note_filename(note) == "hello-world--id-note_001.md"
 
     def test_special_chars_in_note_id(self):
         """Special chars in note_id get normalized via slug."""
         note = WikiNote(note_id="note--001", title="Test")
-        assert build_note_filename(note) == "test-note-001.md"
+        assert build_note_filename(note) == "test--id-note--001.md"
 
     def test_empty_title_uses_note_id(self):
         """Empty title slug falls back to note_id only."""
         note = WikiNote(note_id="note_001", title="")
-        assert build_note_filename(note) == "note-001.md"
+        assert build_note_filename(note) == "id-note_001.md"
 
     def test_special_chars_only_title_includes_note_id(self):
         """Title that slugifies to fallback 'note' still includes note_id."""
         note = WikiNote(note_id="note_001", title="!!!")
-        assert build_note_filename(note) == "note-note-001.md"
+        assert build_note_filename(note) == "note--id-note_001.md"
 
     def test_deterministic(self):
         """Same note produces same filename every time."""
@@ -537,8 +540,8 @@ class TestExportFilenameCollision:
         assert results[0].written is True
         assert results[1].written is True
         assert results[0].file_path != results[1].file_path
-        assert (tmp_path / "ai-governance-note-a.md").exists()
-        assert (tmp_path / "ai-governance-note-b.md").exists()
+        assert (tmp_path / "ai-governance--id-note_a.md").exists()
+        assert (tmp_path / "ai-governance--id-note_b.md").exists()
 
     def test_punctuation_variants_same_slug_different_files(
         self, tmp_path: Path
@@ -559,7 +562,7 @@ class TestExportFilenameCollision:
         note = _make_validated_note(title="Résumé", note_id="note_001")
         result = export_note(note, tmp_path)
         assert result.written is True
-        assert "note-001" in result.file_path
+        assert "note_001" in result.file_path
 
     def test_same_note_id_same_title_skips_on_second(self, tmp_path: Path):
         """Export same note twice with allow_overwrite=False => skip second."""
@@ -585,7 +588,7 @@ class TestExportFilenameCollision:
             _make_validated_note(title="AI Governance", note_id="note_b"),
         ]
         export_notes(notes, tmp_path)
-        file_b = tmp_path / "ai-governance-note-b.md"
+        file_b = tmp_path / "ai-governance--id-note_b.md"
         content_b_before = file_b.read_text()
 
         # Re-export note_a with overwrite
@@ -615,5 +618,150 @@ class TestExportFilenameCollision:
         )
         result = export_note(note, tmp_path, strict=False)
         assert result.written is True
-        assert "note-a" in result.file_path
-        assert "note-b" not in result.file_path
+        assert "note_a" in result.file_path
+        assert "note_b" not in result.file_path
+
+
+class TestEncodeNoteId:
+    """Tests for encode_note_id_for_filename percent-encoding."""
+
+    def test_underscore_vs_dash_remain_distinct(self):
+        """'note_001' and 'note-001' must produce distinct encoded strings."""
+        assert (
+            encode_note_id_for_filename("note_001")
+            == encode_note_id_for_filename("note_001")
+        )
+        assert (
+            encode_note_id_for_filename("note_001")
+            != encode_note_id_for_filename("note-001")
+        )
+
+    def test_dot_vs_dash_remain_distinct(self):
+        """'note.001' and 'note-001' must produce distinct encoded strings."""
+        assert (
+            encode_note_id_for_filename("note.001")
+            != encode_note_id_for_filename("note-001")
+        )
+
+    def test_underscore_encoded(self):
+        """Underscore must be percent-encoded to stay distinct from dash."""
+        assert encode_note_id_for_filename("note_001") == "note_001"
+
+    def test_dash_passthrough(self):
+        """Dash is left readable (safe character)."""
+        assert encode_note_id_for_filename("note-001") == "note-001"
+
+    def test_dot_encoded(self):
+        """Dot must be percent-encoded."""
+        assert encode_note_id_for_filename("note.001") == "note.001"
+
+    def test_slash_encoded(self):
+        """Slash must be percent-encoded, not left as path separator."""
+        assert encode_note_id_for_filename("note/001") == "note%2F001"
+
+    def test_space_encoded(self):
+        """Space must be percent-encoded."""
+        assert encode_note_id_for_filename("note 001") == "note%20001"
+
+    def test_non_ascii_encoded(self):
+        """Non-ASCII characters must be percent-encoded."""
+        encoded = encode_note_id_for_filename("โน้ต001")
+        assert encoded != "โน้ต001"
+        assert encoded != ""
+
+    def test_alphanumeric_passthrough(self):
+        """Alphanumeric characters are left readable."""
+        assert encode_note_id_for_filename("abc123") == "abc123"
+
+    def test_deterministic(self):
+        """Same input produces same output every time."""
+        val = encode_note_id_for_filename("note_001")
+        assert val == encode_note_id_for_filename("note_001")
+
+
+class TestNoteIdLossySlugPrevention:
+    """Codex P1: percent-encoding must prevent lossy slug collisions."""
+
+    def test_underscore_vs_dash_same_title_different_files(self, tmp_path: Path):
+        """note_001 and note-001 with same title => two distinct files."""
+        notes = [
+            _make_validated_note(title="Same Title", note_id="note_001"),
+            _make_validated_note(title="Same Title", note_id="note-001"),
+        ]
+        results = export_notes(notes, tmp_path)
+        assert results[0].written is True
+        assert results[1].written is True
+        assert results[0].file_path != results[1].file_path
+        assert (tmp_path / "same-title--id-note_001.md").exists()
+        assert (tmp_path / "same-title--id-note-001.md").exists()
+
+    def test_dot_vs_dash_same_title_different_files(self, tmp_path: Path):
+        """note.001 and note-001 with same title => two distinct files."""
+        notes = [
+            _make_validated_note(title="Same Title", note_id="note.001"),
+            _make_validated_note(title="Same Title", note_id="note-001"),
+        ]
+        results = export_notes(notes, tmp_path)
+        assert results[0].written is True
+        assert results[1].written is True
+        assert results[0].file_path != results[1].file_path
+
+    def test_slash_in_note_id_no_nested_path(self, tmp_path: Path):
+        """note/001 must not create directory nesting."""
+        note = _make_validated_note(title="Test", note_id="note/001")
+        result = export_note(note, tmp_path)
+        assert result.written is True
+        # File should be directly under output_dir, not in a subdirectory
+        assert "/" not in result.file_path.split(str(tmp_path))[-1].lstrip("/")[:-3]
+        # The file exists directly under tmp_path
+        assert (tmp_path / "test--id-note%2F001.md").exists()
+
+    def test_non_ascii_note_id_distinct(self, tmp_path: Path):
+        """Non-ASCII note_id must not collapse to empty or shared slug."""
+        notes = [
+            _make_validated_note(title="Same Title", note_id="โน้ต001"),
+            _make_validated_note(title="Same Title", note_id="note_001"),
+        ]
+        results = export_notes(notes, tmp_path)
+        assert results[0].written is True
+        assert results[1].written is True
+        assert results[0].file_path != results[1].file_path
+
+    def test_whitespace_note_id_distinct_from_hyphen_underscore(
+        self, tmp_path: Path
+    ):
+        """'note 001' must not collapse into same filename as 'note_001' or 'note-001'."""
+        notes = [
+            _make_validated_note(title="Same", note_id="note 001"),
+            _make_validated_note(title="Same", note_id="note_001"),
+            _make_validated_note(title="Same", note_id="note-001"),
+        ]
+        results = export_notes(notes, tmp_path)
+        assert all(r.written for r in results)
+        paths = {r.file_path for r in results}
+        assert len(paths) == 3
+
+
+class TestEmptyNoteId:
+    """Empty or whitespace-only note_id must be rejected."""
+
+    def test_build_note_filename_raises_value_error(self):
+        """build_note_filename raises ValueError for empty note_id."""
+        note = WikiNote(note_id="", title="Test")
+        with pytest.raises(ValueError, match="note_id"):
+            build_note_filename(note)
+
+    def test_build_note_filename_raises_for_whitespace(self):
+        """build_note_filename raises ValueError for whitespace note_id."""
+        note = WikiNote(note_id="   ", title="Test")
+        with pytest.raises(ValueError, match="note_id"):
+            build_note_filename(note)
+
+    def test_export_note_rejects_empty_note_id(self, tmp_path: Path):
+        """export_note returns rejected result for empty note_id."""
+        note = WikiNote(note_id="", title="Test")
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "note_id" in result.reason.lower()

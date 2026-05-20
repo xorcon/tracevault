@@ -11,30 +11,58 @@ In strict mode (default), the exporter rejects:
 """
 
 from pathlib import Path
+from urllib.parse import quote
 
 from tracevault.wiki.markdown import render_note
 from tracevault.wiki.models import WikiExportResult, WikiNote
 from tracevault.wiki.slug import generate_slug
 
 
+def encode_note_id_for_filename(note_id: str) -> str:
+    """Encode a note_id into a deterministic, filename-safe string.
+
+    Uses percent-encoding so that distinct note_id values always
+    produce distinct encoded strings.  Alphanumeric characters and
+    dash are left readable; everything else (underscore, dot, slash,
+    space, non-ASCII) is percent-encoded.
+
+    Examples:
+        "note_001"  -> "note%5F001"
+        "note-001"  -> "note-001"
+        "note.001"  -> "note%2E001"
+        "note/001"  -> "note%2F001"
+    """
+    return quote(note_id, safe="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-")
+
+
 def build_note_filename(note: WikiNote) -> str:
     """Build a deterministic, filename-safe export filename for a note.
 
-    Uses ``{title-slug}-{note-id-slug}.md`` so that distinct notes with
-    colliding titles land on different files.  Falls back to a
-    note-id-only filename when the title is empty or whitespace-only.
+    Uses ``{title-slug}--id-{encoded-note-id}.md`` so that distinct
+    notes with colliding titles land on different files.  Falls back
+    to ``id-{encoded-note-id}.md`` when the title is empty or
+    whitespace-only.
 
     The canonical ``note.note_id`` is used (not ``metadata.note_id``)
     so that pathing stays consistent even when strict validation is
     disabled.
+
+    Raises:
+        ValueError: If note.note_id is empty or whitespace-only.
     """
-    note_id_slug = generate_slug(note.note_id)
+    if not note.note_id.strip():
+        raise ValueError(
+            "note_id must not be empty or whitespace-only; "
+            "cannot build a stable export filename"
+        )
+
+    encoded_id = encode_note_id_for_filename(note.note_id)
 
     if not note.title.strip():
-        return f"{note_id_slug}.md"
+        return f"id-{encoded_id}.md"
 
     title_slug = generate_slug(note.title)
-    return f"{title_slug}-{note_id_slug}.md"
+    return f"{title_slug}--id-{encoded_id}.md"
 
 
 def export_note(
@@ -70,7 +98,18 @@ def export_note(
         WikiExportResult with rendered Markdown and write/reject status.
     """
     output_dir = Path(output_dir)
-    file_path = output_dir / build_note_filename(note)
+
+    # Build filename (raises ValueError for empty note_id)
+    try:
+        filename = build_note_filename(note)
+    except ValueError as exc:
+        file_path = output_dir / "unknown.md"
+        return _rejected(
+            note_id=note.note_id,
+            file_path=str(file_path),
+            reason=str(exc),
+        )
+    file_path = output_dir / filename
 
     # Validation contract checks (strict mode)
     if strict:
