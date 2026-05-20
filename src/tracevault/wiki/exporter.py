@@ -5,6 +5,7 @@ overwriting existing files unless explicitly allowed.
 
 In strict mode (default), the exporter rejects:
 - Notes without validated metadata (validation_status != "validated")
+- Notes where note.note_id != metadata.note_id (identity mismatch)
 - Claims marked supported (unsupported=False) but with no evidence_refs
 - Claims explicitly marked unsupported
 """
@@ -33,6 +34,7 @@ def export_note(
 
     In strict mode (default), the exporter enforces the evidence contract:
     - Notes without validated metadata are rejected
+    - Notes with note.note_id != metadata.note_id are rejected
     - Claims marked supported but with no evidence_refs are rejected
     - Claims explicitly marked unsupported are rejected
 
@@ -62,6 +64,18 @@ def export_note(
                     file_path=str(file_path),
                     reason="Note is not validated",
                 )
+
+        # Identity consistency: note.note_id must match metadata.note_id
+        meta = note.metadata
+        if meta is not None and meta.note_id != note.note_id:
+            return _rejected(
+                note_id=note.note_id,
+                file_path=str(file_path),
+                reason=(
+                    f"note_id mismatch: note.note_id '{note.note_id}' does not "
+                    f"match metadata.note_id '{meta.note_id}'"
+                ),
+            )
 
         # Check for invalid supported claims (no evidence refs)
         for claim in note.invalid_supported_claims():

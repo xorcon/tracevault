@@ -358,6 +358,92 @@ class TestWikiNote:
         assert errors == []
 
 
+class TestWikiNoteValidate:
+    """validate() method: identity consistency + claim coverage."""
+
+    def test_validate_returns_error_for_mismatched_note_id(self):
+        """note.note_id != metadata.note_id should produce an error."""
+        meta = WikiExportMetadata(
+            note_id="note_b",
+            generated_at="2026-01-01T00:00:00+00:00",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_a",
+            title="Mismatch",
+            metadata=meta,
+        )
+        errors = note.validate()
+        assert len(errors) == 1
+        assert "note_id mismatch" in errors[0]
+        assert "note_a" in errors[0]
+        assert "note_b" in errors[0]
+
+    def test_validate_passes_when_note_id_matches(self):
+        """Matching note.note_id == metadata.note_id should not error."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="2026-01-01T00:00:00+00:00",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Match",
+            metadata=meta,
+        )
+        errors = note.validate()
+        assert errors == []
+
+    def test_validate_skips_identity_check_when_no_metadata(self):
+        """No metadata means no identity mismatch check."""
+        note = WikiNote(
+            note_id="note_001",
+            title="No metadata",
+            metadata=None,
+        )
+        errors = note.validate()
+        assert errors == []
+
+    def test_validate_catches_both_identity_and_claim_errors(self):
+        """validate() aggregates identity + claim coverage errors."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = WikiExportMetadata(
+            note_id="wrong_id",
+            generated_at="2026-01-01T00:00:00+00:00",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Both Bad",
+            claims=[
+                WikiClaim(statement="Good claim", evidence_refs=[ref]),
+                WikiClaim(statement="No refs", unsupported=False, evidence_refs=[]),
+            ],
+            metadata=meta,
+        )
+        errors = note.validate()
+        assert len(errors) == 2
+        assert "note_id mismatch" in errors[0]
+        assert "no evidence refs" in errors[1]
+
+    def test_validate_does_not_auto_correct(self):
+        """validate() must not mutate note_id or metadata.note_id."""
+        meta = WikiExportMetadata(
+            note_id="note_b",
+            generated_at="2026-01-01T00:00:00+00:00",
+        )
+        note = WikiNote(
+            note_id="note_a",
+            title="Immutable",
+            metadata=meta,
+        )
+        note.validate()
+        assert note.note_id == "note_a"
+        assert note.metadata.note_id == "note_b"
+
+
 class TestWikiExportResult:
     def test_written(self):
         result = WikiExportResult(

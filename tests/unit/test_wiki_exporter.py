@@ -353,3 +353,124 @@ class TestExportNotes:
         assert len(results) == 2
         assert results[0].written is True
         assert results[1].written is True
+
+
+class TestExportNoteIdConsistency:
+    """Codex P2: note.note_id must match metadata.note_id before export."""
+
+    def test_strict_rejects_mismatched_note_id(self, tmp_path: Path):
+        """note.note_id='note_a', metadata.note_id='note_b' => rejected."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = WikiExportMetadata(
+            note_id="note_b",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            evidence_count=1,
+        )
+        note = WikiNote(
+            note_id="note_a",
+            title="Mismatch",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            metadata=meta,
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "note_id mismatch" in result.reason
+        assert not (tmp_path / "mismatch.md").exists()
+
+    def test_matching_note_id_exports_successfully(self, tmp_path: Path):
+        """note.note_id == metadata.note_id => writes file."""
+        note = _make_validated_note()
+        assert note.note_id == note.metadata.note_id
+        result = export_note(note, tmp_path)
+        assert result.written is True
+        assert result.rejected is False
+
+    def test_non_strict_allows_mismatched_note_id(self, tmp_path: Path):
+        """Non-strict mode should not reject identity mismatch."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = WikiExportMetadata(
+            note_id="note_b",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            evidence_count=1,
+        )
+        note = WikiNote(
+            note_id="note_a",
+            title="Mismatch",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            metadata=meta,
+        )
+        result = export_note(note, tmp_path, strict=False)
+        assert result.written is True
+        assert result.rejected is False
+
+    def test_mismatch_rejected_before_rendering(self, tmp_path: Path):
+        """Rejected result must have empty markdown (no render on invalid note)."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = WikiExportMetadata(
+            note_id="note_b",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            evidence_count=1,
+        )
+        note = WikiNote(
+            note_id="note_a",
+            title="Mismatch",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            metadata=meta,
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.markdown == ""
+
+    def test_rejected_reason_includes_both_ids(self, tmp_path: Path):
+        """Reason message must include both note.note_id and metadata.note_id."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = WikiExportMetadata(
+            note_id="note_b",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            evidence_count=1,
+        )
+        note = WikiNote(
+            note_id="note_a",
+            title="Mismatch",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            metadata=meta,
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert "note_a" in result.reason
+        assert "note_b" in result.reason
+
+    def test_export_does_not_auto_correct_note_id(self, tmp_path: Path):
+        """Export must not mutate note.note_id or metadata.note_id."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = WikiExportMetadata(
+            note_id="note_b",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            evidence_count=1,
+        )
+        note = WikiNote(
+            note_id="note_a",
+            title="Mismatch",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            metadata=meta,
+        )
+        export_note(note, tmp_path)
+        assert note.note_id == "note_a"
+        assert note.metadata.note_id == "note_b"

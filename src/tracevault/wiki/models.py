@@ -277,6 +277,29 @@ class WikiNote:
             )
         return errors
 
+    def validate(self) -> list[str]:
+        """Validate a WikiNote for export readiness.
+
+        Checks structural identity consistency and claim coverage.
+        Returns a list of error messages. Empty list means valid.
+
+        Identity rule:
+        - note.note_id must match note.metadata.note_id when metadata is
+          present. Auto-correction is intentionally not performed; strict
+          export should fail closed to surface upstream proof-chain errors.
+        """
+        errors: list[str] = []
+
+        # Identity consistency: note_id must match metadata.note_id
+        if self.metadata is not None and self.metadata.note_id != self.note_id:
+            errors.append(
+                f"note_id mismatch: note.note_id '{self.note_id}' does not "
+                f"match metadata.note_id '{self.metadata.note_id}'"
+            )
+
+        errors.extend(self.validate_claim_coverage())
+        return errors
+
     def to_dict(self) -> dict:
         return {
             "note_id": self.note_id,
