@@ -17,6 +17,26 @@ from tracevault.wiki.models import WikiExportResult, WikiNote
 from tracevault.wiki.slug import generate_slug
 
 
+def build_note_filename(note: WikiNote) -> str:
+    """Build a deterministic, filename-safe export filename for a note.
+
+    Uses ``{title-slug}-{note-id-slug}.md`` so that distinct notes with
+    colliding titles land on different files.  Falls back to a
+    note-id-only filename when the title is empty or whitespace-only.
+
+    The canonical ``note.note_id`` is used (not ``metadata.note_id``)
+    so that pathing stays consistent even when strict validation is
+    disabled.
+    """
+    note_id_slug = generate_slug(note.note_id)
+
+    if not note.title.strip():
+        return f"{note_id_slug}.md"
+
+    title_slug = generate_slug(note.title)
+    return f"{title_slug}-{note_id_slug}.md"
+
+
 def export_note(
     note: WikiNote,
     output_dir: Path | str,
@@ -50,8 +70,7 @@ def export_note(
         WikiExportResult with rendered Markdown and write/reject status.
     """
     output_dir = Path(output_dir)
-    slug = generate_slug(note.title)
-    file_path = output_dir / f"{slug}.md"
+    file_path = output_dir / build_note_filename(note)
 
     # Validation contract checks (strict mode)
     if strict:
