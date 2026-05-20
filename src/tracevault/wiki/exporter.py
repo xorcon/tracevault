@@ -113,10 +113,18 @@ def export_note(
 
     # Validation contract checks (strict mode)
     if strict:
-        # Check validation status
+        # Metadata is always mandatory in strict mode regardless of
+        # allow_unvalidated.  Structural proof-chain metadata must exist.
+        if note.metadata is None:
+            return _rejected(
+                note_id=note.note_id,
+                file_path=str(file_path),
+                reason="Note has no metadata",
+            )
+
+        # Validation status check — allow_unvalidated relaxes only this.
         if not allow_unvalidated:
-            meta = note.metadata
-            if meta is None or meta.validation_status != "validated":
+            if note.metadata.validation_status != "validated":
                 return _rejected(
                     note_id=note.note_id,
                     file_path=str(file_path),
@@ -125,7 +133,7 @@ def export_note(
 
         # Identity consistency: note.note_id must match metadata.note_id
         meta = note.metadata
-        if meta is not None and meta.note_id != note.note_id:
+        if meta.note_id != note.note_id:
             return _rejected(
                 note_id=note.note_id,
                 file_path=str(file_path),

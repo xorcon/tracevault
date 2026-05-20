@@ -57,38 +57,38 @@ class TestYamlFrontmatter:
         assert lines[0] == "---"
         assert lines[1].startswith("note_id:")
         # Find closing frontmatter
-        assert lines[2] == "note_type: compiled_knowledge_wiki_note"
-        assert lines[3] == "status: proposal"
+        assert lines[2] == 'note_type: "compiled_knowledge_wiki_note"'
+        assert lines[3] == 'status: "proposal"'
 
     def test_frontmatter_generated_at(self):
         meta = _make_validated_metadata()
         md = render_note(_make_note(metadata=meta))
-        assert f"generated_at: {GENERATED_AT}" in md
+        assert f'generated_at: "{GENERATED_AT}"' in md
 
     def test_frontmatter_generated_by(self):
         meta = _make_validated_metadata()
         md = render_note(_make_note(metadata=meta))
-        assert "generated_by: tracevault" in md
+        assert 'generated_by: "tracevault"' in md
 
     def test_frontmatter_source_policy(self):
         meta = _make_validated_metadata()
         md = render_note(_make_note(metadata=meta))
-        assert "source_policy: raw_text_authoritative" in md
+        assert 'source_policy: "raw_text_authoritative"' in md
 
     def test_frontmatter_validation_status(self):
         meta = _make_validated_metadata()
         md = render_note(_make_note(metadata=meta))
-        assert "validation_status: validated" in md
+        assert 'validation_status: "validated"' in md
 
     def test_frontmatter_schema_version(self):
         meta = _make_validated_metadata()
         md = render_note(_make_note(metadata=meta))
-        assert "schema_version: wiki-export-v1" in md
+        assert 'schema_version: "wiki-export-v1"' in md
 
     def test_frontmatter_generator_version(self):
         meta = _make_validated_metadata()
         md = render_note(_make_note(metadata=meta))
-        assert "generator_version: 0.1.0" in md
+        assert 'generator_version: "0.1.0"' in md
 
     def test_frontmatter_evidence_count(self):
         meta = _make_validated_metadata(evidence_count=3)
@@ -104,9 +104,9 @@ class TestYamlFrontmatter:
         meta = _make_validated_metadata(source_documents=[doc])
         md = render_note(_make_note(metadata=meta))
         assert "source_documents:" in md
-        assert "  - document_id: doc_001" in md
-        assert "source_path: docs/test.md" in md
-        assert "source_raw_hash: abc123" in md
+        assert '  - document_id: "doc_001"' in md
+        assert 'source_path: "docs/test.md"' in md
+        assert 'source_raw_hash: "abc123"' in md
 
     def test_frontmatter_source_chunks(self):
         chunk = WikiSourceChunk(
@@ -118,10 +118,10 @@ class TestYamlFrontmatter:
         meta = _make_validated_metadata(source_chunks=[chunk])
         md = render_note(_make_note(metadata=meta))
         assert "source_chunks:" in md
-        assert "  - document_id: doc_001" in md
-        assert "chunk_id: chunk_001" in md
-        assert "source_raw_hash: abc" in md
-        assert "evidence_text_hash: def" in md
+        assert '  - document_id: "doc_001"' in md
+        assert 'chunk_id: "chunk_001"' in md
+        assert 'source_raw_hash: "abc"' in md
+        assert 'evidence_text_hash: "def"' in md
 
     def test_no_metadata_omits_frontmatter_fields(self):
         md = render_note(_make_note())
@@ -151,7 +151,7 @@ class TestRenderNoteDeterministic:
             validation_status="validated",
         )
         md = render_note(_make_note(metadata=meta))
-        assert "generated_at: 2026-01-01T00:00:00+00:00" in md
+        assert 'generated_at: "2026-01-01T00:00:00+00:00"' in md
 
 
 class TestRenderNoteStructure:
@@ -328,12 +328,12 @@ class TestMetadataRendering:
     def test_metadata_source_policy_rendered(self):
         meta = _make_validated_metadata()
         md = render_note(_make_note(metadata=meta))
-        assert "source_policy: raw_text_authoritative" in md
+        assert 'source_policy: "raw_text_authoritative"' in md
 
     def test_metadata_validation_status_rendered(self):
         meta = _make_validated_metadata()
         md = render_note(_make_note(metadata=meta))
-        assert "validation_status: validated" in md
+        assert 'validation_status: "validated"' in md
 
     def test_metadata_evidence_count_rendered(self):
         meta = _make_validated_metadata(evidence_count=5)
@@ -366,3 +366,158 @@ class TestSectionOrder:
         evidence_pos = md.index("## Evidence References")
         metadata_pos = md.index("## TraceVault Metadata")
         assert title_pos < summary_pos < claims_pos < evidence_pos < metadata_pos
+
+
+class TestYamlScalarQuoting:
+    """Codex P2: YAML frontmatter string scalars must be safely quoted
+    to prevent corruption from YAML-significant characters."""
+
+    def test_frontmatter_quotes_normal_scalar_strings(self):
+        """A: normal string values are double-quoted in frontmatter."""
+        meta = _make_validated_metadata()
+        md = render_note(_make_note(metadata=meta))
+        assert 'note_id: "note_001"' in md
+        assert 'note_type: "compiled_knowledge_wiki_note"' in md
+        assert 'status: "proposal"' in md
+
+    def test_source_path_with_hash_is_quoted(self):
+        """B: source_path containing '#' is quoted, not raw plain scalar."""
+        doc = WikiSourceDocument(
+            document_id="doc_001",
+            source_path="docs/notes#section-1.md",
+            source_raw_hash="abc123",
+        )
+        meta = _make_validated_metadata(source_documents=[doc])
+        md = render_note(_make_note(metadata=meta))
+        assert 'source_path: "docs/notes#section-1.md"' in md
+
+    def test_source_path_with_colon_is_quoted(self):
+        """C: source_path containing ':' is quoted."""
+        doc = WikiSourceDocument(
+            document_id="doc_001",
+            source_path="C:\\Users\\docs\\test.md",
+            source_raw_hash="abc123",
+        )
+        meta = _make_validated_metadata(source_documents=[doc])
+        md = render_note(_make_note(metadata=meta))
+        # The colon in the path must be within quotes
+        assert 'source_path: "' in md
+        assert "C:" in md
+
+    def test_yaml_boolean_like_document_id_remains_string(self):
+        """D: document_id containing 'true', 'null', '123', or 'a: b'
+        remains quoted as string, not interpreted as YAML bool/number/null."""
+        doc = WikiSourceDocument(
+            document_id="true",
+            source_raw_hash="abc",
+        )
+        meta = _make_validated_metadata(source_documents=[doc])
+        md = render_note(_make_note(metadata=meta))
+        assert 'document_id: "true"' in md
+        # Make sure it's not bare 'true' (YAML boolean)
+        assert "document_id: true\n" not in md
+        assert "document_id: true " not in md
+
+    def test_null_like_document_id_remains_quoted(self):
+        """D variant: 'null' document_id remains quoted."""
+        doc = WikiSourceDocument(
+            document_id="null",
+            source_raw_hash="abc",
+        )
+        meta = _make_validated_metadata(source_documents=[doc])
+        md = render_note(_make_note(metadata=meta))
+        assert 'document_id: "null"' in md
+
+    def test_numeric_like_document_id_remains_quoted(self):
+        """D variant: '123' document_id remains quoted."""
+        doc = WikiSourceDocument(
+            document_id="123",
+            source_raw_hash="abc",
+        )
+        meta = _make_validated_metadata(source_documents=[doc])
+        md = render_note(_make_note(metadata=meta))
+        assert 'document_id: "123"' in md
+
+    def test_colon_space_in_value_remains_quoted(self):
+        """D variant: value like 'a: b' remains quoted."""
+        doc = WikiSourceDocument(
+            document_id="a: b",
+            source_raw_hash="abc",
+        )
+        meta = _make_validated_metadata(source_documents=[doc])
+        md = render_note(_make_note(metadata=meta))
+        assert 'document_id: "a: b"' in md
+
+    def test_double_quote_in_value_is_escaped(self):
+        """E: value containing double quote is escaped."""
+        doc = WikiSourceDocument(
+            document_id='doc "special"',
+            source_raw_hash="abc",
+        )
+        meta = _make_validated_metadata(source_documents=[doc])
+        md = render_note(_make_note(metadata=meta))
+        assert r'document_id: "doc \"special\""' in md
+
+    def test_newline_in_value_is_escaped(self):
+        """F: value containing newline is escaped as \\n."""
+        doc = WikiSourceDocument(
+            document_id="doc\nline2",
+            source_raw_hash="abc",
+        )
+        meta = _make_validated_metadata(source_documents=[doc])
+        md = render_note(_make_note(metadata=meta))
+        assert r'document_id: "doc\nline2"' in md
+
+    def test_evidence_count_remains_numeric(self):
+        """G: evidence_count is emitted without quotes."""
+        meta = _make_validated_metadata(evidence_count=42)
+        md = render_note(_make_note(metadata=meta))
+        assert "evidence_count: 42" in md
+        # Must not be quoted
+        assert '"42"' not in md
+
+    def test_frontmatter_field_order_deterministic(self):
+        """H: frontmatter fields appear in stable, deterministic order."""
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(metadata=meta))
+        fm = md.split("---")[1]  # content between delimiters
+        lines = fm.strip().split("\n")
+        field_names = [line.split(":")[0].strip() for line in lines if ":" in line]
+        # note_id should come before note_type, which comes before status
+        assert field_names.index("note_id") < field_names.index("note_type")
+        assert field_names.index("note_type") < field_names.index("status")
+        assert field_names.index("status") < field_names.index("generated_at")
+        assert field_names.index("generated_at") < field_names.index(
+            "generated_by"
+        )
+        assert field_names.index("evidence_count") > field_names.index(
+            "validation_status"
+        )
+
+    def test_optional_empty_confidence_renders_consistently(self):
+        """I: optional empty/None values render consistently."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            confidence=None,  # explicitly None
+        )
+        md = render_note(_make_note(metadata=meta))
+        # confidence=None should not render (existing behavior: if meta.confidence)
+        assert "confidence:" not in md
+
+    def test_backslash_in_value_is_escaped(self):
+        """Additional: backslash in value is escaped."""
+        doc = WikiSourceDocument(
+            document_id="doc\\path",
+            source_raw_hash="abc",
+        )
+        meta = _make_validated_metadata(source_documents=[doc])
+        md = render_note(_make_note(metadata=meta))
+        assert r'document_id: "doc\\path"' in md
+
+    def test_generated_at_with_colon_plus_quoted(self):
+        """generated_at ISO timestamp with colons and + is quoted."""
+        meta = _make_validated_metadata()
+        md = render_note(_make_note(metadata=meta))
+        assert 'generated_at: "2026-01-01T00:00:00+00:00"' in md

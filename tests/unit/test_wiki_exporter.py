@@ -121,7 +121,7 @@ class TestExportNoteValidationGated:
         )
         result = export_note(note, tmp_path)
         assert result.rejected is True
-        assert "not validated" in result.reason.lower()
+        assert "metadata" in result.reason.lower()
 
     def test_writes_validated_note(self, tmp_path: Path):
         note = _make_validated_note()
@@ -765,3 +765,74 @@ class TestEmptyNoteId:
         assert result.written is False
         assert result.skipped is False
         assert "note_id" in result.reason.lower()
+
+
+class TestMetadataMandatoryWithAllowUnvalidated:
+    """Codex P2: allow_unvalidated should only relax validation_status,
+    not allow metadata=None.  Structural proof-chain metadata must remain
+    mandatory in strict export mode."""
+
+    def test_strict_metadata_none_allow_unvalidated_true_rejected(
+        self, tmp_path: Path
+    ):
+        """A: metadata=None + allow_unvalidated=True => rejected."""
+        note = WikiNote(note_id="note_001", title="No Meta", metadata=None)
+        result = export_note(note, tmp_path, allow_unvalidated=True)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "metadata" in result.reason.lower()
+
+    def test_strict_metadata_none_allow_unvalidated_false_rejected(
+        self, tmp_path: Path
+    ):
+        """B: metadata=None + allow_unvalidated=False => rejected."""
+        note = WikiNote(note_id="note_001", title="No Meta", metadata=None)
+        result = export_note(note, tmp_path, allow_unvalidated=False)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "metadata" in result.reason.lower()
+
+    def test_strict_meta_present_unvalidated_with_allow_exports(
+        self, tmp_path: Path
+    ):
+        """C: metadata present, validation_required + allow_unvalidated=True
+        => exports successfully."""
+        note = WikiNote(
+            note_id="note_001",
+            title="Unvalidated",
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validation_required",
+            ),
+        )
+        result = export_note(note, tmp_path, allow_unvalidated=True)
+        assert result.written is True
+        assert result.rejected is False
+
+    def test_strict_meta_present_unvalidated_without_allow_rejected(
+        self, tmp_path: Path
+    ):
+        """D: metadata present, validation_required + allow_unvalidated=False
+        => rejected."""
+        note = WikiNote(
+            note_id="note_001",
+            title="Unvalidated",
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validation_required",
+            ),
+        )
+        result = export_note(note, tmp_path, allow_unvalidated=False)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+
+    def test_metadata_none_rejection_no_file_created(self, tmp_path: Path):
+        """E: metadata=None rejection must not create any file."""
+        note = WikiNote(note_id="note_001", title="No Meta", metadata=None)
+        export_note(note, tmp_path, allow_unvalidated=True)
+        assert list(tmp_path.iterdir()) == []
