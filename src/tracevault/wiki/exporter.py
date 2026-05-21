@@ -11,7 +11,6 @@ In strict mode (default), the exporter rejects:
 """
 
 from pathlib import Path
-from urllib.parse import quote
 
 from tracevault.wiki.markdown import render_note
 from tracevault.wiki.models import WikiExportResult, WikiNote
@@ -19,20 +18,25 @@ from tracevault.wiki.slug import generate_slug
 
 
 def encode_note_id_for_filename(note_id: str) -> str:
-    """Encode a note_id into a deterministic, filename-safe string.
+    """Encode a note_id into a deterministic, case-insensitive-filesystem-safe string.
 
-    Uses percent-encoding so that distinct note_id values always
-    produce distinct encoded strings.  Alphanumeric characters and
-    dash are left readable; everything else (underscore, dot, slash,
-    space, non-ASCII) is percent-encoded.
+    Uses UTF-8 hex encoding so that every distinct note_id byte sequence
+    produces a distinct lowercase hex suffix.  This guarantees filenames
+    differing only by ASCII case (e.g. "NoteA" vs "notea") remain
+    distinguishable on case-insensitive filesystems like default
+    Windows/macOS configurations.
+
+    Output contains only lowercase hexadecimal characters 0-9a-f.
 
     Examples:
-        "note_001"  -> "note%5F001"
-        "note-001"  -> "note-001"
-        "note.001"  -> "note%2E001"
-        "note/001"  -> "note%2F001"
+        "NoteA"   -> "4e6f746541"
+        "notea"   -> "6e6f746561"
+        "note_001" -> "6e6f74655f303031"
     """
-    return quote(note_id, safe="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-")
+    normalized = note_id.strip()
+    if not normalized:
+        raise ValueError("note_id must not be empty")
+    return normalized.encode("utf-8").hex()
 
 
 def build_note_filename(note: WikiNote) -> str:
