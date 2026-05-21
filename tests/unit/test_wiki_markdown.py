@@ -1,6 +1,8 @@
 """Tests for wiki Markdown rendering."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from tracevault.wiki.markdown import _render_blockquote, render_note
 from tracevault.wiki.models import (
@@ -494,8 +496,8 @@ class TestYamlScalarQuoting:
             "validation_status"
         )
 
-    def test_optional_empty_confidence_renders_consistently(self):
-        """I: optional empty/None values render consistently."""
+    def test_optional_none_confidence_not_rendered(self):
+        """I: confidence=None does not render in frontmatter."""
         meta = WikiExportMetadata(
             note_id="note_001",
             generated_at=GENERATED_AT,
@@ -503,8 +505,145 @@ class TestYamlScalarQuoting:
             confidence=None,  # explicitly None
         )
         md = render_note(_make_note(metadata=meta))
-        # confidence=None should not render (existing behavior: if meta.confidence)
+        # confidence=None should not render
         assert "confidence:" not in md
+
+
+class TestConfidenceRendering:
+    """Codex P2: zero confidence values must render in frontmatter."""
+
+    def test_confidence_zero_int_renders(self):
+        """A: confidence=0 renders in YAML frontmatter."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            confidence=0,
+        )
+        md = render_note(_make_note(metadata=meta))
+        assert "confidence: 0" in md
+
+    def test_confidence_zero_float_renders(self):
+        """B: confidence=0.0 renders in YAML frontmatter."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            confidence=0.0,
+        )
+        md = render_note(_make_note(metadata=meta))
+        assert "confidence: 0.0" in md
+
+    def test_confidence_zero_string_renders_quoted(self):
+        """C: confidence='0' renders as quoted string."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            confidence="0",
+        )
+        md = render_note(_make_note(metadata=meta))
+        assert 'confidence: "0"' in md
+
+    def test_confidence_none_not_rendered(self):
+        """D: confidence=None does not render."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            confidence=None,
+        )
+        md = render_note(_make_note(metadata=meta))
+        assert "confidence:" not in md
+
+    def test_confidence_nonzero_renders(self):
+        """E: existing nonzero string confidence still renders."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=GENERATED_AT,
+            validation_status="validated",
+            confidence="high",
+        )
+        md = render_note(_make_note(metadata=meta))
+        assert 'confidence: "high"' in md
+
+
+class TestGeneratedAtUtcNormalization:
+    """Codex P2: generated_at_iso() normalizes to UTC."""
+
+    def test_aware_non_utc_datetime_normalizes_to_utc(self):
+        """A: +07:00 datetime converts to UTC."""
+        dt = datetime(
+            2026, 1, 1, 7, 0,
+            tzinfo=timezone(timedelta(hours=7)),
+        )
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=dt,
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+    def test_naive_datetime_treated_as_utc(self):
+        """B: naive datetime treated as UTC."""
+        dt = datetime(2026, 1, 1, 0, 0)
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=dt,
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+    def test_string_with_plus_offset_normalizes_to_utc(self):
+        """C: string with +07:00 normalizes to +00:00."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="2026-01-01T07:00:00+07:00",
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+    def test_string_with_z_normalizes_to_utc(self):
+        """D: string with Z normalizes to +00:00."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="2026-01-01T00:00:00Z",
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+    def test_invalid_string_raises_value_error(self):
+        """E: invalid string fails with ValueError (fail-closed)."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="not-a-datetime",
+            validation_status="validated",
+        )
+        with pytest.raises(ValueError):
+            meta.generated_at_iso()
+
+    def test_frontmatter_uses_normalized_generated_at(self):
+        """F: frontmatter rendered generated_at is UTC-normalized."""
+        dt = datetime(
+            2026, 1, 1, 7, 0,
+            tzinfo=timezone(timedelta(hours=7)),
+        )
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=dt,
+            validation_status="validated",
+        )
+        md = render_note(_make_note(metadata=meta))
+        assert 'generated_at: "2026-01-01T00:00:00+00:00"' in md
+
+    def test_existing_utc_string_stable(self):
+        """G: existing UTC string timestamp remains unchanged."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="2026-01-01T00:00:00+00:00",
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
 
     def test_backslash_in_value_is_escaped(self):
         """Additional: backslash in value is escaped."""

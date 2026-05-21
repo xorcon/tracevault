@@ -180,7 +180,7 @@ def _render_frontmatter(note: WikiNote, lines: list[str]) -> None:
         lines.append(f"schema_version: {yaml_scalar(meta.schema_version)}")
         lines.append(f"source_policy: {yaml_scalar(meta.source_policy)}")
         lines.append(f"validation_status: {yaml_scalar(meta.validation_status)}")
-        if meta.confidence:
+        if meta.confidence is not None:
             lines.append(f"confidence: {yaml_scalar(meta.confidence)}")
         lines.append(f"evidence_count: {meta.evidence_count}")
 

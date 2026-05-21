@@ -187,10 +187,32 @@ class WikiExportMetadata:
     source_chunks: list[WikiSourceChunk] = field(default_factory=list)
 
     def generated_at_iso(self) -> str:
-        """Return generated_at as an ISO 8601 UTC string."""
+        """Return generated_at as an ISO 8601 UTC-normalized string.
+
+        - timezone-aware datetime: converted to UTC via astimezone().
+        - naive datetime: treated as UTC.
+        - ISO string: parsed, converted to UTC if offset present.
+        - Z-suffix strings: normalized to +00:00 for fromisoformat compat.
+        - Invalid strings: raise ValueError (fail-closed).
+        """
         if isinstance(self.generated_at, datetime):
-            return self.generated_at.isoformat()
-        return self.generated_at
+            dt = self.generated_at
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+            return dt.isoformat()
+
+        s = self.generated_at
+        # Normalize Z suffix to +00:00 for fromisoformat compatibility
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return dt.isoformat()
 
     def to_dict(self) -> dict:
         return {

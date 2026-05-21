@@ -1,5 +1,9 @@
 """Tests for wiki export data models."""
 
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
 from tracevault.wiki.models import (
     WikiClaim,
     WikiEvidenceReference,
@@ -484,3 +488,77 @@ class TestWikiExportResult:
         assert result.skipped is False
         assert result.written is False
         assert result.markdown == ""
+
+
+class TestGeneratedAtUtcNormalization:
+    """Codex P2: generated_at_iso() normalizes all inputs to UTC."""
+
+    def test_aware_non_utc_datetime_normalizes_to_utc(self):
+        """A: +07:00 datetime converts to UTC."""
+        dt = datetime(
+            2026, 1, 1, 7, 0,
+            tzinfo=timezone(timedelta(hours=7)),
+        )
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=dt,
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+    def test_naive_datetime_treated_as_utc(self):
+        """B: naive datetime treated as UTC."""
+        dt = datetime(2026, 1, 1, 0, 0)
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=dt,
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+    def test_string_with_plus_offset_normalizes_to_utc(self):
+        """C: string with +07:00 normalizes to +00:00."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="2026-01-01T07:00:00+07:00",
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+    def test_string_with_z_normalizes_to_utc(self):
+        """D: string with Z normalizes to +00:00."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="2026-01-01T00:00:00Z",
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+    def test_invalid_string_raises_value_error(self):
+        """E: invalid string fails with ValueError (fail-closed)."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="not-a-datetime",
+            validation_status="validated",
+        )
+        with pytest.raises(ValueError):
+            meta.generated_at_iso()
+
+    def test_existing_utc_datetime_stable(self):
+        """G: existing UTC datetime remains unchanged."""
+        dt = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at=dt,
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+    def test_existing_utc_string_stable(self):
+        """G: existing UTC string timestamp remains unchanged."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="2026-01-01T00:00:00+00:00",
+            validation_status="validated",
+        )
+        assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
