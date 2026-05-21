@@ -26,17 +26,21 @@ def encode_note_id_for_filename(note_id: str) -> str:
     distinguishable on case-insensitive filesystems like default
     Windows/macOS configurations.
 
+    The raw note_id bytes are encoded without normalization—no strip,
+    no slugify, no case change.  Empty or whitespace-only note_ids are
+    rejected.
+
     Output contains only lowercase hexadecimal characters 0-9a-f.
 
     Examples:
-        "NoteA"   -> "4e6f746541"
-        "notea"   -> "6e6f746561"
-        "note_001" -> "6e6f74655f303031"
+        "note_001"  -> "6e6f74655f303031"
+        " note_001 " -> "206e6f74655f30303120"
+        "NoteA"     -> "4e6f746541"
+        "notea"     -> "6e6f746561"
     """
-    normalized = note_id.strip()
-    if not normalized:
-        raise ValueError("note_id must not be empty")
-    return normalized.encode("utf-8").hex()
+    if not note_id or not note_id.strip():
+        raise ValueError("note_id must not be empty or whitespace-only")
+    return note_id.encode("utf-8").hex()
 
 
 def build_note_filename(note: WikiNote) -> str:

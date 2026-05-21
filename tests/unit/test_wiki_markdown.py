@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from tracevault.wiki.markdown import render_note
+from tracevault.wiki.markdown import _render_blockquote, render_note
 from tracevault.wiki.models import (
     WikiClaim,
     WikiEvidenceReference,
@@ -521,3 +521,117 @@ class TestYamlScalarQuoting:
         meta = _make_validated_metadata()
         md = render_note(_make_note(metadata=meta))
         assert 'generated_at: "2026-01-01T00:00:00+00:00"' in md
+
+
+class TestMultiLineExcerptBlockquote:
+    """Codex P3: every excerpt line must be quoted in evidence block."""
+
+    def test_multiline_excerpt_every_line_quoted(self):
+        """A: Multi-line excerpt renders every line with '> '."""
+        ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            excerpt="first line\nsecond line\nthird line",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(source_evidence=[ref], metadata=meta))
+        assert "> first line" in md
+        assert "> second line" in md
+        assert "> third line" in md
+
+    def test_blank_line_inside_excerpt_renders_as_quote(self):
+        """B: Blank line inside excerpt renders as '>'."""
+        ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            excerpt="before\n\nafter",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(source_evidence=[ref], metadata=meta))
+        lines = md.split("\n")
+        # Find the blank-line-within-quote region
+        assert ">" in lines
+        # The "before" and "after" lines should be quoted
+        assert "> before" in md
+        assert "> after" in md
+
+    def test_single_line_excerpt_one_blockquote_line(self):
+        """C: Single-line excerpt remains one blockquote line."""
+        ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            excerpt="single line only",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(source_evidence=[ref], metadata=meta))
+        assert "> single line only" in md
+        # Count how many lines in evidence section start with "> "
+        evidence_section = md.split("## Evidence References")[1].split(
+            "## TraceVault Metadata"
+        )[0]
+        blockquote_lines = [
+            line for line in evidence_section.split("\n") if line.startswith("> ")
+        ]
+        assert len(blockquote_lines) == 1
+
+    def test_excerpt_line_starting_with_gt_still_quoted(self):
+        """D: Excerpt line that starts with '>' still receives quote prefix."""
+        ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            excerpt="normal line\n> already looks quoted",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(source_evidence=[ref], metadata=meta))
+        assert "> normal line" in md
+        assert "> > already looks quoted" in md
+
+    def test_no_excerpt_lines_appear_as_unquoted_body(self):
+        """E: No excerpt lines appear as unquoted normal body text."""
+        ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            excerpt="line one\nline two\nline three",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(source_evidence=[ref], metadata=meta))
+        # Get the evidence section content
+        evidence_section = md.split("## Evidence References")[1].split(
+            "## TraceVault Metadata"
+        )[0]
+        lines = evidence_section.split("\n")
+        for line in lines:
+            # Each non-empty line in the evidence section should be
+            # a metadata line or a blockquote line
+            stripped = line.strip()
+            if stripped and not stripped.startswith(">") and not stripped.startswith(
+                "-"
+            ) and not stripped.startswith("###") and stripped not in (
+                "",
+                "### E1",
+                "- **Document**: `doc_001`",
+            ):
+                # If the line content is an excerpt line, it must be quoted
+                if stripped in ("line one", "line two", "line three"):
+                    raise AssertionError(f"Unquoted excerpt line found: {stripped}")
+
+    def test_render_blockquote_helper_single_line(self):
+        """_render_blockquote helper: single line."""
+        result = _render_blockquote("hello")
+        assert result == ["> hello"]
+
+    def test_render_blockquote_helper_multiline(self):
+        """_render_blockquote helper: multi-line with blank."""
+        result = _render_blockquote("first\n\nsecond")
+        assert result == ["> first", ">", "> second"]
+
+    def test_render_blockquote_helper_trailing_newline(self):
+        """_render_blockquote: trailing newline handled deterministically."""
+        result = _render_blockquote("line one\nline two\n")
+        # splitlines() drops the trailing empty element for a trailing \n
+        assert result == ["> line one", "> line two"]

@@ -738,6 +738,23 @@ class TestEncodeNoteId:
         with pytest.raises(ValueError, match="note_id"):
             encode_note_id_for_filename("   ")
 
+    def test_preserves_leading_trailing_space_bytes(self):
+        """A: 'note_001' and ' note_001 ' produce distinct encodings (no strip)."""
+        assert (
+            encode_note_id_for_filename("note_001")
+            != encode_note_id_for_filename(" note_001 ")
+        )
+
+    def test_leading_trailing_space_hex_exact(self):
+        """Exact hex of ' note_001 ' includes space bytes 20 at start and end."""
+        assert encode_note_id_for_filename(" note_001 ") == "206e6f74655f30303120"
+
+    def test_no_strip_normalization(self):
+        """Note ID is encoded exactly, not stripped or normalized."""
+        assert encode_note_id_for_filename("note_001") == "6e6f74655f303031"
+        assert encode_note_id_for_filename(" note_001") == "206e6f74655f303031"
+        assert encode_note_id_for_filename("note_001 ") == "6e6f74655f30303120"
+
 
 class TestNoteIdLossySlugPrevention:
     """Codex P1: hex encoding must prevent lossy slug collisions."""
@@ -826,6 +843,15 @@ class TestEmptyNoteId:
         assert result.skipped is False
         assert "note_id" in result.reason.lower()
 
+    def test_export_note_rejects_whitespace_note_id(self, tmp_path: Path):
+        """export_note returns rejected result for whitespace-only note_id."""
+        note = WikiNote(note_id="   ", title="Test")
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "note_id" in result.reason.lower()
+
 
 class TestMetadataMandatoryWithAllowUnvalidated:
     """Codex P2: allow_unvalidated should only relax validation_status,
@@ -896,3 +922,109 @@ class TestMetadataMandatoryWithAllowUnvalidated:
         note = WikiNote(note_id="note_001", title="No Meta", metadata=None)
         export_note(note, tmp_path, allow_unvalidated=True)
         assert list(tmp_path.iterdir()) == []
+
+
+class TestNoteIdBytePreservingFilename:
+    """Codex P2: note_id bytes preserved in filename encoding (no strip)."""
+
+    def test_space_padded_note_id_exports_distinct_files(self, tmp_path: Path):
+        """B: 'note_001' and ' note_001 ' with same title export to two files."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1", document_id="doc_002", chunk_id="chunk_002"
+        )
+        note1 = WikiNote(
+            note_id="note_001",
+            title="Same Title",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref1])],
+            source_evidence=[ref1],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+                evidence_count=1,
+            ),
+        )
+        note2 = WikiNote(
+            note_id=" note_001 ",
+            title="Same Title",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref2])],
+            source_evidence=[ref2],
+            metadata=WikiExportMetadata(
+                note_id=" note_001 ",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+                evidence_count=1,
+            ),
+        )
+        results = export_notes([note1, note2], tmp_path)
+        assert results[0].written is True
+        assert results[1].written is True
+        assert results[0].file_path != results[1].file_path
+
+    def test_space_padded_note_id_filenames_differ_case_insensitively(
+        self, tmp_path: Path
+    ):
+        """C: path1.name.lower() != path2.name.lower() for 'note_001' vs ' note_001 '."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1", document_id="doc_002", chunk_id="chunk_002"
+        )
+        note1 = WikiNote(
+            note_id="note_001",
+            title="Same Title",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref1])],
+            source_evidence=[ref1],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+                evidence_count=1,
+            ),
+        )
+        note2 = WikiNote(
+            note_id=" note_001 ",
+            title="Same Title",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref2])],
+            source_evidence=[ref2],
+            metadata=WikiExportMetadata(
+                note_id=" note_001 ",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+                evidence_count=1,
+            ),
+        )
+        results = export_notes([note1, note2], tmp_path)
+        path1 = Path(results[0].file_path)
+        path2 = Path(results[1].file_path)
+        assert path1.name.lower() != path2.name.lower()
+
+    def test_filename_uses_note_note_id_bytes_not_stripped(self, tmp_path: Path):
+        """G: filename hex suffix matches note.note_id bytes, not stripped."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        # " note_001 " encodes to 206e6f74655f30303120 (includes space bytes)
+        note = WikiNote(
+            note_id=" note_001 ",
+            title="Test",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            source_evidence=[ref],
+            metadata=WikiExportMetadata(
+                note_id=" note_001 ",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+                evidence_count=1,
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.written is True
+        # Must contain the space-padded hex, not the stripped version
+        assert "206e6f74655f30303120" in result.file_path
+        assert "6e6f74655f303031" not in result.file_path.replace(
+            "206e6f74655f30303120", ""
+        )

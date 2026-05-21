@@ -121,7 +121,7 @@ def render_note(note: WikiNote) -> str:
             lines.append(f"- **Evidence Text Hash**: `{ref.evidence_text_hash}`")
         if ref.excerpt:
             lines.append("")
-            lines.append(f"> {ref.excerpt}")
+            lines.extend(_render_blockquote(ref.excerpt))
         lines.append("")
 
     # TraceVault metadata section
@@ -271,3 +271,20 @@ def _resolve_display_labels(
             result[identity] = f"{original}-{label_count[original]}"
 
     return result
+
+
+def _render_blockquote(text: str) -> list[str]:
+    """Render a multi-line excerpt as properly quoted Markdown blockquote lines.
+
+    Every line of the excerpt receives a "> " prefix so that none of the
+    excerpt text bleeds into normal body paragraphs.  Blank lines inside
+    the excerpt render as ">" to preserve paragraph structure within the
+    quote.
+
+    If the excerpt is non-empty but contains no newlines (single-line),
+    it returns a single "> line" entry.
+    """
+    lines = text.splitlines()
+    if not lines and text:
+        lines = [text]
+    return [f"> {line}" if line else ">" for line in lines]
