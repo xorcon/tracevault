@@ -299,6 +299,18 @@ def _dedup_labels(
     return labels
 
 
+def _safe_label(label: object) -> str:
+    """Return a safe non-empty display label string.
+
+    Non-string, None, empty, and whitespace-only labels fall back to
+    a deterministic base that participates in the existing disambiguation
+    logic so the final set of display labels is always globally unique.
+    """
+    if isinstance(label, str) and label.strip():
+        return label
+    return "evidence"
+
+
 def _resolve_display_labels(
     identity_map: list[tuple[tuple, WikiEvidenceReference]],
 ) -> dict[tuple, str]:
@@ -308,19 +320,23 @@ def _resolve_display_labels(
     the first keeps the original label, subsequent ones get a
     deterministic disambiguation suffix (e.g., E1-2).
 
+    Non-string, None, empty, and whitespace-only labels are normalized
+    to a safe "evidence" fallback before disambiguation, so rendering
+    never receives a non-string display label.
+
     A global set of used labels and a pre-collected set of original
     labels ensure a disambiguated candidate (e.g., E1-2) never collides
     with another ref's original label, and vice versa.
     """
-    # Pre-collect all original labels so disambiguation can skip them.
-    originals: set[str] = {ref.label for _, ref in identity_map}
+    # Pre-collect all original labels (normalized) so disambiguation can skip them.
+    originals: set[str] = {_safe_label(ref.label) for _, ref in identity_map}
 
     used_labels: set[str] = set()
     label_count: dict[str, int] = {}
     result: dict[tuple, str] = {}
 
     for identity, ref in identity_map:
-        original = ref.label
+        original = _safe_label(ref.label)
         if original not in label_count:
             label_count[original] = 1
             if original not in used_labels:

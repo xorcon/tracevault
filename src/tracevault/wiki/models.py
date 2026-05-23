@@ -410,6 +410,7 @@ class WikiNote:
 
         errors.extend(self.validate_claim_coverage())
         errors.extend(self.validate_evidence_source_identity())
+        errors.extend(self.validate_evidence_labels())
         return errors
 
     def to_dict(self) -> dict:

@@ -1007,3 +1007,114 @@ class TestWikiNoteValidateEvidenceLabels:
         original = note.to_dict()
         note.validate_evidence_labels()
         assert note.to_dict() == original
+
+
+class TestWikiNoteValidateAggregate:
+    """validate() aggregates evidence label errors with other error types."""
+
+    def test_validate_returns_label_error_for_label_none(self):
+        """A: WikiNote.validate() returns label error for label=None."""
+        ref = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Bad label", evidence_refs=[ref])],
+        )
+        errors = note.validate()
+        assert any("label" in e for e in errors)
+
+    def test_validate_returns_label_error_for_label_empty(self):
+        """B: WikiNote.validate() returns label error for label=""."""
+        ref = WikiEvidenceReference(
+            label="", document_id="doc_001", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Bad label", evidence_refs=[ref])],
+        )
+        errors = note.validate()
+        assert any("label" in e for e in errors)
+
+    def test_validate_returns_label_error_for_whitespace_label(self):
+        """C: WikiNote.validate() returns label error for whitespace label."""
+        ref = WikiEvidenceReference(
+            label="   ", document_id="doc_001", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Bad label", evidence_refs=[ref])],
+        )
+        errors = note.validate()
+        assert any("label" in e for e in errors)
+
+    def test_validate_aggregates_label_and_source_identity_errors(self):
+        """D: Label errors and source identity errors coexist in validate()."""
+        ref = WikiEvidenceReference(
+            label="", document_id="", chunk_id=""
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Bad ref", evidence_refs=[ref])],
+        )
+        errors = note.validate()
+        assert any("source identity" in e for e in errors)
+        assert any("label" in e for e in errors)
+
+    def test_validate_aggregates_label_and_note_id_errors(self):
+        """E: Label errors and note_id mismatch errors coexist in validate()."""
+        ref = WikiEvidenceReference(
+            label="", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = WikiExportMetadata(
+            note_id="wrong_id",
+            generated_at="2026-01-01T00:00:00+00:00",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Bad label", evidence_refs=[ref])],
+            metadata=meta,
+        )
+        errors = note.validate()
+        assert any("note_id mismatch" in e for e in errors)
+        assert any("label" in e for e in errors)
+
+    def test_valid_note_with_labels_passes_aggregate_validate(self):
+        """F: Valid note with non-empty labels passes aggregate validate()."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="2026-01-01T00:00:00+00:00",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Good", evidence_refs=[ref])],
+            metadata=meta,
+        )
+        assert note.validate() == []
+
+    def test_validate_does_not_mutate_note_or_claims(self):
+        """validate() must not mutate note, claims, or evidence refs."""
+        ref = WikiEvidenceReference(
+            label="", document_id="doc_001", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Bad label", evidence_refs=[ref])],
+        )
+        note_before = note.to_dict()
+        note.validate()
+        assert note.to_dict() == note_before

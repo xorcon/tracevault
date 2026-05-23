@@ -1162,6 +1162,183 @@ class TestGloballyUniqueEvidenceLabels:
         assert ref3.label == labels_before[2]
 
 
+class TestMissingLabelFallbackRendering:
+    """Codex P2: non-string/empty label rendering must not crash and must
+    use a deterministic safe fallback display label."""
+
+    def test_label_none_does_not_raise(self):
+        """A: render_note with label=None does not raise TypeError."""
+        ref = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        note = _make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            source_evidence=[ref],
+            metadata=meta,
+        )
+        # Must not raise
+        md = render_note(note)
+        assert "# Test Note" in md
+
+    def test_label_none_renders_fallback(self):
+        """B: label=None renders a fallback label containing 'evidence'."""
+        ref = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        note = _make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            source_evidence=[ref],
+            metadata=meta,
+        )
+        md = render_note(note)
+        assert "[evidence]" in md
+
+    def test_label_empty_renders_fallback(self):
+        """C: label="" renders fallback label."""
+        ref = WikiEvidenceReference(
+            label="", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        note = _make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            source_evidence=[ref],
+            metadata=meta,
+        )
+        md = render_note(note)
+        assert "[evidence]" in md
+
+    def test_label_whitespace_renders_fallback(self):
+        """D: label="   " renders fallback label."""
+        ref = WikiEvidenceReference(
+            label="   ", document_id="doc_001", chunk_id="chunk_001"
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        note = _make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            source_evidence=[ref],
+            metadata=meta,
+        )
+        md = render_note(note)
+        assert "[evidence]" in md
+
+    def test_multiple_missing_labels_unique_fallback(self):
+        """E: Multiple missing labels render globally unique fallback labels."""
+        ref1 = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        ref2 = WikiEvidenceReference(
+            label="", document_id="doc_002", chunk_id="chunk_002"
+        )
+        ref3 = WikiEvidenceReference(
+            label="  ", document_id="doc_003", chunk_id="chunk_003"
+        )
+        meta = _make_validated_metadata(evidence_count=3)
+        note = _make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref1, ref2, ref3])],
+            source_evidence=[ref1, ref2, ref3],
+            metadata=meta,
+        )
+        md = render_note(note)
+        # All three should get unique fallback labels
+        assert "evidence" in md
+        assert "evidence-2" in md
+        assert "evidence-3" in md
+
+    def test_existing_evidence_label_plus_missing_no_collision(self):
+        """F: existing label 'evidence' plus missing label does not collide."""
+        ref_valid = WikiEvidenceReference(
+            label="evidence", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref_missing = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_002",
+            chunk_id="chunk_002",
+        )
+        meta = _make_validated_metadata(evidence_count=2)
+        note = _make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref_valid, ref_missing])],
+            source_evidence=[ref_valid, ref_missing],
+            metadata=meta,
+        )
+        md = render_note(note)
+        # Valid "evidence" label keeps its name, missing label gets disambiguated
+        assert "### evidence" in md
+        assert "evidence-2" in md
+
+    def test_claim_citation_join_never_receives_non_string(self):
+        """G: claim citation join never receives non-string labels."""
+        ref1 = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        ref2 = WikiEvidenceReference(
+            label="", document_id="doc_002", chunk_id="chunk_002"
+        )
+        meta = _make_validated_metadata(evidence_count=2)
+        note = _make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref1, ref2])],
+            source_evidence=[ref1, ref2],
+            metadata=meta,
+        )
+        # Must not raise TypeError from ", ".join()
+        md = render_note(note)
+        # The claim line should contain string citation labels
+        claim_lines = [
+            line for line in md.split("\n") if line.startswith("- A fact [")
+        ]
+        assert len(claim_lines) == 1
+        # Verify all label tokens in brackets are non-empty strings
+        bracket_content = claim_lines[0].split("[", 1)[1].split("]")[0]
+        for token in bracket_content.split(", "):
+            assert isinstance(token, str)
+            assert token.strip()
+
+    def test_original_evidence_ref_label_unchanged_after_render(self):
+        """H: original evidence ref label remains None/unchanged after render."""
+        ref = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        note = _make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            source_evidence=[ref],
+            metadata=meta,
+        )
+        render_note(note)
+        # The original ref must not be mutated
+        assert ref.label is None
+
+    def test_valid_labels_still_render_unchanged(self):
+        """I: Valid labels still render unchanged."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E2", document_id="doc_002", chunk_id="chunk_002"
+        )
+        meta = _make_validated_metadata(evidence_count=2)
+        note = _make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref1, ref2])],
+            source_evidence=[ref1, ref2],
+            metadata=meta,
+        )
+        md = render_note(note)
+        assert "[E1, E2]" in md
+        assert "### E1" in md
+        assert "### E2" in md
+
+
 def _heading_exists(md: str, heading: str) -> bool:
     """Check if an exact heading line exists (not a substring of a longer heading)."""
     prefix = heading + " "
