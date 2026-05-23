@@ -274,10 +274,20 @@ class TestExportResultSemantics:
 
 
 class TestExportNoteOutput:
-    def test_markdown_in_result(self, tmp_path: Path):
+    def test_markdown_in_result_on_written(self, tmp_path: Path):
         note = _make_validated_note()
         result = export_note(note, tmp_path)
+        assert result.written is True
         assert "# Test Note" in result.markdown
+
+    def test_markdown_empty_on_skipped(self, tmp_path: Path):
+        """Skipped result has empty markdown (skip happens before render)."""
+        existing = tmp_path / "existing--id-6e6f74655f303031.md"
+        existing.write_text("existing content")
+        note = _make_validated_note(title="Existing")
+        result = export_note(note, tmp_path, strict=False)
+        assert result.skipped is True
+        assert result.markdown == ""
 
     def test_file_path_in_result(self, tmp_path: Path):
         note = _make_validated_note()
@@ -1028,3 +1038,123 @@ class TestNoteIdBytePreservingFilename:
         assert "6e6f74655f303031" not in result.file_path.replace(
             "206e6f74655f30303120", ""
         )
+
+
+class TestSkipBeforeRender:
+    """Codex P2: export_note should check file existence before rendering
+    to avoid wasted rendering work and prevent rendering errors on skipped
+    notes."""
+
+    def test_existing_file_skips_before_render(self, tmp_path: Path):
+        """A: Existing file with allow_overwrite=False skips before render."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="not-a-datetime",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Test Note",
+            metadata=meta,
+        )
+        existing = tmp_path / "test-note--id-6e6f74655f303031.md"
+        existing.write_text("existing content")
+        result = export_note(note, tmp_path, strict=False)
+        assert result.skipped is True
+        assert result.written is False
+        assert result.rejected is False
+        assert result.reason == "File already exists"
+
+    def test_skipped_result_does_not_raise_on_invalid_generated_at(
+        self, tmp_path: Path
+    ):
+        """C: export_note returns skipped=True without raising."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="not-a-datetime",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Test Note",
+            metadata=meta,
+        )
+        existing = tmp_path / "test-note--id-6e6f74655f303031.md"
+        existing.write_text("existing content")
+        # Must not raise — file exists so render is skipped
+        result = export_note(note, tmp_path, strict=False)
+        assert result.skipped is True
+
+    def test_skipped_result_has_empty_markdown(self, tmp_path: Path):
+        """D: Skipped result markdown is empty (no render called)."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="not-a-datetime",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Test Note",
+            metadata=meta,
+        )
+        existing = tmp_path / "test-note--id-6e6f74655f303031.md"
+        existing.write_text("existing content")
+        result = export_note(note, tmp_path, strict=False)
+        assert result.skipped is True
+        assert result.markdown == ""
+
+    def test_allow_overwrite_invalid_rendering_raises_or_rejects(
+        self, tmp_path: Path
+    ):
+        """E: With allow_overwrite=True, invalid generated_at note with no
+        existing file still raises during rendering (strict=False)."""
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="not-a-datetime",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Test Note",
+            metadata=meta,
+        )
+        with pytest.raises(ValueError):
+            export_note(note, tmp_path, allow_overwrite=True, strict=False)
+
+    def test_export_notes_continues_after_skip(self, tmp_path: Path):
+        """F: export_notes() continues processing later notes when earlier
+        note is skipped."""
+        meta_bad = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="not-a-datetime",
+            validation_status="validated",
+        )
+        note1 = WikiNote(
+            note_id="note_001",
+            title="Test Note",
+            metadata=meta_bad,
+        )
+        note2 = _make_validated_note(title="Good", note_id="note_002")
+
+        # Pre-create note_001 file so it gets skipped (before render)
+        existing = tmp_path / "test-note--id-6e6f74655f303031.md"
+        existing.write_text("existing content")
+
+        results = export_notes([note1, note2], tmp_path, strict=False)
+        assert len(results) == 2
+        assert results[0].skipped is True
+        assert results[1].written is True
+
+    def test_existing_non_destructive_skip_test_still_passes(
+        self, tmp_path: Path
+    ):
+        """G: Existing skip test behavior preserved with new semantics."""
+        existing = tmp_path / "existing--id-6e6f74655f303031.md"
+        existing.write_text("existing content")
+        note = _make_validated_note(title="Existing")
+        result = export_note(note, tmp_path, strict=False)
+        assert result.written is False
+        assert result.skipped is True
+        assert result.rejected is False
+        assert result.reason == "File already exists"
+        assert existing.read_text() == "existing content"

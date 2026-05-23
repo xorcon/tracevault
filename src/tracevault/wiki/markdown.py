@@ -252,12 +252,20 @@ def _build_identity_map(
 def _resolve_display_labels(
     identity_map: list[tuple[tuple, WikiEvidenceReference]],
 ) -> dict[tuple, str]:
-    """Resolve display labels for each identity key.
+    """Resolve globally unique display labels for each identity key.
 
     If two refs share the same original label but differ in identity,
     the first keeps the original label, subsequent ones get a
     deterministic disambiguation suffix (e.g., E1-2).
+
+    A global set of used labels and a pre-collected set of original
+    labels ensure a disambiguated candidate (e.g., E1-2) never collides
+    with another ref's original label, and vice versa.
     """
+    # Pre-collect all original labels so disambiguation can skip them.
+    originals: set[str] = {ref.label for _, ref in identity_map}
+
+    used_labels: set[str] = set()
     label_count: dict[str, int] = {}
     result: dict[tuple, str] = {}
 
@@ -265,10 +273,26 @@ def _resolve_display_labels(
         original = ref.label
         if original not in label_count:
             label_count[original] = 1
-            result[identity] = original
+            if original not in used_labels:
+                result[identity] = original
+                used_labels.add(original)
+            else:
+                count = 2
+                while f"{original}-{count}" in used_labels:
+                    count += 1
+                result[identity] = f"{original}-{count}"
+                used_labels.add(result[identity])
         else:
             label_count[original] += 1
-            result[identity] = f"{original}-{label_count[original]}"
+            count = label_count[original]
+            candidate = f"{original}-{count}"
+            while candidate in used_labels or (
+                candidate in originals and candidate != original
+            ):
+                count += 1
+                candidate = f"{original}-{count}"
+            result[identity] = candidate
+            used_labels.add(candidate)
 
     return result
 

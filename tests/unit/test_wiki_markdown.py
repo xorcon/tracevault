@@ -774,3 +774,164 @@ class TestMultiLineExcerptBlockquote:
         result = _render_blockquote("line one\nline two\n")
         # splitlines() drops the trailing empty element for a trailing \n
         assert result == ["> line one", "> line two"]
+
+
+class TestGloballyUniqueEvidenceLabels:
+    """Codex P1: evidence display labels must be globally unique across the
+    entire note, not just unique per original-label group."""
+
+    def test_duplicate_e1_plus_separate_original_e1_2(self):
+        """A: Duplicate E1 plus separate original E1-2 produces unique labels."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_002"
+        )
+        ref3 = WikiEvidenceReference(
+            label="E1-2", document_id="doc_002", chunk_id="chunk_003"
+        )
+        meta = _make_validated_metadata(evidence_count=3)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=[ref1, ref2, ref3])],
+            source_evidence=[ref1, ref2, ref3],
+            metadata=meta,
+        ))
+        assert _heading_exists(md, "### E1")
+        assert _heading_exists(md, "### E1-2")
+        assert _heading_exists(md, "### E1-3")
+
+    def test_claim_citation_tokens_point_to_final_labels(self):
+        """B: Claim citation tokens point to final globally unique labels."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_002"
+        )
+        ref3 = WikiEvidenceReference(
+            label="E1-2", document_id="doc_002", chunk_id="chunk_003"
+        )
+        meta = _make_validated_metadata(evidence_count=3)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=[ref1, ref2, ref3])],
+            source_evidence=[ref1, ref2, ref3],
+            metadata=meta,
+        ))
+        # Citation tokens in the claim line must use the final unique labels
+        assert "[E1, E1-3, E1-2]" in md
+
+    def test_evidence_headings_are_unique(self):
+        """C: Evidence headings are unique — no duplicate ### headings."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_002"
+        )
+        ref3 = WikiEvidenceReference(
+            label="E1-2", document_id="doc_002", chunk_id="chunk_003"
+        )
+        meta = _make_validated_metadata(evidence_count=3)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=[ref1, ref2, ref3])],
+            source_evidence=[ref1, ref2, ref3],
+            metadata=meta,
+        ))
+        evidence_section = md.split("## Evidence References")[1].split(
+            "## TraceVault Metadata"
+        )[0]
+        headings = [
+            line for line in evidence_section.split("\n")
+            if line.startswith("### ")
+        ]
+        assert len(headings) == len(set(headings))
+
+    def test_three_duplicates_same_label(self):
+        """D: Three duplicates of same label produce E1, E1-2, E1-3."""
+        refs = [
+            WikiEvidenceReference(
+                label="E1", document_id="doc_001", chunk_id=f"chunk_{i}"
+            )
+            for i in range(1, 4)
+        ]
+        meta = _make_validated_metadata(evidence_count=3)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=refs)],
+            source_evidence=refs,
+            metadata=meta,
+        ))
+        assert _heading_exists(md, "### E1")
+        assert _heading_exists(md, "### E1-2")
+        assert _heading_exists(md, "### E1-3")
+
+    def test_e1_2_exists_duplicate_e1_skips_to_next(self):
+        """E: If E1-2 already exists, duplicate E1 skips to next available."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1-2", document_id="doc_002", chunk_id="chunk_002"
+        )
+        ref3 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_003"
+        )
+        meta = _make_validated_metadata(evidence_count=3)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=[ref1, ref2, ref3])],
+            source_evidence=[ref1, ref2, ref3],
+            metadata=meta,
+        ))
+        assert _heading_exists(md, "### E1")
+        assert _heading_exists(md, "### E1-2")
+        assert _heading_exists(md, "### E1-3")
+
+    def test_existing_disambiguation_tests_still_pass(self):
+        """F: Existing duplicate-label tests still work."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_002"
+        )
+        meta = _make_validated_metadata(evidence_count=2)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref1, ref2])],
+            source_evidence=[ref1, ref2],
+            metadata=meta,
+        ))
+        assert "E1" in md
+        assert "E1-2" in md
+        assert "[E1, E1-2]" in md
+
+    def test_original_evidence_objects_not_mutated(self):
+        """G: Original evidence reference objects are not mutated."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_002"
+        )
+        ref3 = WikiEvidenceReference(
+            label="E1-2", document_id="doc_002", chunk_id="chunk_003"
+        )
+        labels_before = [ref1.label, ref2.label, ref3.label]
+        meta = _make_validated_metadata(evidence_count=3)
+        render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=[ref1, ref2, ref3])],
+            source_evidence=[ref1, ref2, ref3],
+            metadata=meta,
+        ))
+        # Labels must not be mutated
+        assert ref1.label == labels_before[0]
+        assert ref2.label == labels_before[1]
+        assert ref3.label == labels_before[2]
+
+
+def _heading_exists(md: str, heading: str) -> bool:
+    """Check if an exact heading line exists (not a substring of a longer heading)."""
+    prefix = heading + " "
+    for line in md.split("\n"):
+        if line == heading or line.startswith(prefix):
+            return True
+    return False

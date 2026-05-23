@@ -173,18 +173,18 @@ def export_note(
                     ),
                 )
 
-    markdown = render_note(note)
-
-    # File existence check (non-destructive)
+    # File existence check — before rendering to avoid wasted work
+    # and prevent rendering errors from surfacing on notes we'd skip.
     if file_path.exists() and not allow_overwrite:
         return WikiExportResult(
             note_id=note.note_id,
             file_path=str(file_path),
-            markdown=markdown,
             written=False,
             skipped=True,
             reason="File already exists",
         )
+
+    markdown = render_note(note)
 
     # Write
     output_dir.mkdir(parents=True, exist_ok=True)
