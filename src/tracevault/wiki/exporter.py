@@ -195,9 +195,17 @@ def export_note(
             reason=f"render failure: {type(exc).__name__}: {exc}",
         )
 
-    # Write
-    output_dir.mkdir(parents=True, exist_ok=True)
-    file_path.write_text(markdown, encoding="utf-8")
+    # Write — catch filesystem failures so export_notes() can
+    # continue the batch instead of aborting.
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(markdown, encoding="utf-8")
+    except OSError as exc:
+        return _rejected(
+            note_id=note.note_id,
+            file_path=str(file_path),
+            reason=f"filesystem failure: {type(exc).__name__}: {exc}",
+        )
 
     return WikiExportResult(
         note_id=note.note_id,

@@ -1268,3 +1268,135 @@ class TestRenderFailureRejection:
         assert result.rejected is True
         assert "test-note" in result.file_path
         assert "6e6f74655f303031" in result.file_path
+
+
+class TestFilesystemFailureRejection:
+    """Codex P1: Catch filesystem write errors and return rejected result.
+
+    If output_dir.mkdir or file_path.write_text fails (FileExistsError,
+    PermissionError, OSError), export_note must return a rejected result
+    instead of raising, so export_notes() can continue the batch.
+    """
+
+    def test_output_dir_is_existing_file_returns_rejected(self, tmp_path: Path):
+        """A: output_dir path is an existing file => rejected, no exception."""
+        not_a_dir = tmp_path / "not_a_dir"
+        not_a_dir.write_text("this is a file, not a directory")
+        note = _make_validated_note()
+        result = export_note(note, not_a_dir, strict=False)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "filesystem" in result.reason.lower()
+
+    def test_write_text_permission_error_returns_rejected(self, tmp_path: Path):
+        """B: write_text raises PermissionError => rejected, no exception."""
+        note = _make_validated_note()
+
+        def patched_write_text(self_path, data, *args, **kwargs):
+            raise PermissionError("denied")
+
+        monkeypatch_ctx = pytest.MonkeyPatch()
+        monkeypatch_ctx.setattr(Path, "write_text", patched_write_text)
+        try:
+            result = export_note(note, tmp_path, strict=False)
+        finally:
+            monkeypatch_ctx.undo()
+
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert result.markdown == ""
+        assert "PermissionError" in result.reason or "denied" in result.reason
+
+    def test_export_notes_continues_after_filesystem_failure(self, tmp_path: Path):
+        """C: export_notes() continues after one note fails due to
+        filesystem error and writes later valid notes."""
+        good_note = _make_validated_note(title="Good", note_id="note_good")
+
+        # Make note_a target a path where write will fail
+        note_bad_dir = _make_validated_note(title="Bad", note_id="note_a")
+
+        # Create a file at the output_dir level so mkdir on subpath fails
+        # Instead, monkeypatch write_text to fail only for the first call
+        call_count = [0]
+
+        def patched_write_text(self_path, data, *args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise PermissionError("denied")
+            # Fall through to real impl for subsequent calls
+            with self_path.open("w", encoding="utf-8") as f:
+                f.write(data)
+
+        monkeypatch_ctx = pytest.MonkeyPatch()
+        monkeypatch_ctx.setattr(Path, "write_text", patched_write_text)
+        try:
+            # note_a exports first (fails write), note_good exports second (succeeds)
+            results = export_notes([note_bad_dir, good_note], tmp_path, strict=False)
+        finally:
+            monkeypatch_ctx.undo()
+
+        assert len(results) == 2
+        assert results[0].rejected is True
+        assert results[0].written is False
+        assert results[1].written is True
+        assert results[1].rejected is False
+
+    def test_skip_before_render_wins_over_write(self, tmp_path: Path):
+        """D: if target file exists and allow_overwrite=False, returns
+        skipped=True and does not attempt write_text."""
+        # Pre-create the target file
+        existing = tmp_path / "existing--id-6e6f74655f303031.md"
+        existing.write_text("existing content")
+
+        call_count = [0]
+
+        def counting_write_text(self_path, data, *args, **kwargs):
+            call_count[0] += 1
+
+        monkeypatch_ctx = pytest.MonkeyPatch()
+        monkeypatch_ctx.setattr(Path, "write_text", counting_write_text)
+        try:
+            note = _make_validated_note(title="Existing")
+            result = export_note(note, tmp_path, strict=False)
+        finally:
+            monkeypatch_ctx.undo()
+
+        assert result.skipped is True
+        assert result.written is False
+        assert result.rejected is False
+        # write_text must not have been called since skip happens first
+        assert call_count[0] == 0
+
+    def test_allow_overwrite_with_write_failure_returns_rejected(
+        self, tmp_path: Path
+    ):
+        """E: allow_overwrite=True + write failure => rejected, not exception."""
+        existing = tmp_path / "existing--id-6e6f74655f303031.md"
+        existing.write_text("old content")
+
+        def patched_write_text(self_path, data, *args, **kwargs):
+            raise PermissionError("denied")
+
+        monkeypatch_ctx = pytest.MonkeyPatch()
+        monkeypatch_ctx.setattr(Path, "write_text", patched_write_text)
+        try:
+            note = _make_validated_note(title="Existing")
+            result = export_note(note, tmp_path, allow_overwrite=True, strict=False)
+        finally:
+            monkeypatch_ctx.undo()
+
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "filesystem" in result.reason.lower()
+
+    def test_filesystem_failure_markdown_empty(self, tmp_path: Path):
+        """F: rejected due to filesystem failure has empty markdown."""
+        not_a_dir = tmp_path / "not_a_dir"
+        not_a_dir.write_text("this is a file, not a directory")
+        note = _make_validated_note()
+        result = export_note(note, not_a_dir, strict=False)
+        assert result.rejected is True
+        assert result.markdown == ""
