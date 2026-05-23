@@ -624,3 +624,210 @@ class TestGeneratedAtUtcNormalization:
             validation_status="validated",
         )
         assert meta.generated_at_iso() == "2026-01-01T00:00:00+00:00"
+
+
+class TestWikiEvidenceReferenceHasRequiredSourceIdentity:
+    """Model helper: has_required_source_identity()."""
+
+    def test_true_when_both_document_and_chunk_present(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        assert ref.has_required_source_identity() is True
+
+    def test_false_when_document_id_empty(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="", chunk_id="chunk_001"
+        )
+        assert ref.has_required_source_identity() is False
+
+    def test_false_when_chunk_id_empty(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id=""
+        )
+        assert ref.has_required_source_identity() is False
+
+    def test_false_when_both_empty(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="", chunk_id=""
+        )
+        assert ref.has_required_source_identity() is False
+
+    def test_false_when_document_id_whitespace(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="   ", chunk_id="chunk_001"
+        )
+        assert ref.has_required_source_identity() is False
+
+    def test_false_when_chunk_id_whitespace(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="  "
+        )
+        assert ref.has_required_source_identity() is False
+
+    def test_false_when_both_whitespace(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="\t", chunk_id="\n"
+        )
+        assert ref.has_required_source_identity() is False
+
+    def test_identity_key_fallback_still_works_for_sparse_ref(self):
+        """identity_key fallback behavior is not removed."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id=""
+        )
+        assert ref.has_required_source_identity() is False
+        # identity_key still falls back to a usable identity
+        assert ref.identity_key() == ("label-excerpt", "E1", "")
+
+
+class TestWikiClaimEvidenceRefsMissingSourceIdentity:
+    """Model helper: evidence_refs_missing_source_identity()."""
+
+    def test_returns_empty_when_all_refs_valid(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        claim = WikiClaim(statement="A fact", evidence_refs=[ref])
+        assert claim.evidence_refs_missing_source_identity() == []
+
+    def test_returns_ref_with_missing_document_id(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="", chunk_id="chunk_001"
+        )
+        claim = WikiClaim(statement="A fact", evidence_refs=[ref])
+        missing = claim.evidence_refs_missing_source_identity()
+        assert len(missing) == 1
+        assert missing[0] is ref
+
+    def test_returns_ref_with_missing_chunk_id(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id=""
+        )
+        claim = WikiClaim(statement="A fact", evidence_refs=[ref])
+        missing = claim.evidence_refs_missing_source_identity()
+        assert len(missing) == 1
+        assert missing[0] is ref
+
+    def test_returns_both_refs_when_both_sparse(self):
+        ref_bad = WikiEvidenceReference(
+            label="E1", document_id="", chunk_id=""
+        )
+        ref_good = WikiEvidenceReference(
+            label="E2", document_id="doc_002", chunk_id="chunk_002"
+        )
+        claim = WikiClaim(
+            statement="A fact", evidence_refs=[ref_bad, ref_good]
+        )
+        missing = claim.evidence_refs_missing_source_identity()
+        assert len(missing) == 1
+        assert missing[0] is ref_bad
+
+    def test_does_not_mutate_input(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="", chunk_id="chunk_001"
+        )
+        claim = WikiClaim(statement="A fact", evidence_refs=[ref])
+        claim.evidence_refs_missing_source_identity()
+        assert len(claim.evidence_refs) == 1
+        assert claim.evidence_refs[0].document_id == ""
+
+
+class TestWikiNoteValidateEvidenceSourceIdentity:
+    """Model method: validate_evidence_source_identity()."""
+
+    def test_no_errors_when_all_refs_have_identity(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+        )
+        assert note.validate_evidence_source_identity() == []
+
+    def test_error_when_supported_claim_ref_missing_document_id(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="No doc", evidence_refs=[ref])],
+        )
+        errors = note.validate_evidence_source_identity()
+        assert len(errors) == 1
+        assert "document_id" in errors[0]
+        assert "No doc" in errors[0]
+
+    def test_error_when_supported_claim_ref_missing_chunk_id(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id=""
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="No chunk", evidence_refs=[ref])],
+        )
+        errors = note.validate_evidence_source_identity()
+        assert len(errors) == 1
+        assert "chunk_id" in errors[0]
+        assert "No chunk" in errors[0]
+
+    def test_skips_unsupported_claims(self):
+        """Unsupported claims are not checked for evidence identity."""
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="No proof", unsupported=True)],
+        )
+        assert note.validate_evidence_source_identity() == []
+
+    def test_error_message_includes_label(self):
+        ref = WikiEvidenceReference(
+            label="E3", document_id="   ", chunk_id=""
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Bad ref", evidence_refs=[ref])],
+        )
+        errors = note.validate_evidence_source_identity()
+        assert len(errors) == 1
+        assert "E3" in errors[0]
+
+    def test_does_not_mutate_note(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+        )
+        original = note.to_dict()
+        note.validate_evidence_source_identity()
+        assert note.to_dict() == original
+
+
+class TestWikiNoteValidateIncludesEvidenceIdentity:
+    """validate() aggregates evidence source identity errors."""
+
+    def test_validate_catches_evidence_identity_error(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="", chunk_id=""
+        )
+        meta = WikiExportMetadata(
+            note_id="note_001",
+            generated_at="2026-01-01T00:00:00+00:00",
+            validation_status="validated",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Bad", evidence_refs=[ref])],
+            metadata=meta,
+        )
+        errors = note.validate()
+        assert any("source identity" in e for e in errors)

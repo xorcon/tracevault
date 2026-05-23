@@ -173,6 +173,23 @@ def export_note(
                     ),
                 )
 
+        # Evidence source identity check — every supported claim evidence ref
+        # must carry both document_id and chunk_id for proof-chain traceability.
+        for claim in note.claims:
+            if claim.unsupported:
+                continue
+            for ref in claim.evidence_refs_missing_source_identity():
+                return _rejected(
+                    note_id=note.note_id,
+                    file_path=str(file_path),
+                    reason=(
+                        f"evidence ref missing required source identity: "
+                        f"claim='{claim.statement}', label='{ref.label}', "
+                        f"document_id='{ref.document_id}', "
+                        f"chunk_id='{ref.chunk_id}'"
+                    ),
+                )
+
     # File existence check — before rendering to avoid wasted work
     # and prevent rendering errors from surfacing on notes we'd skip.
     if file_path.exists() and not allow_overwrite:

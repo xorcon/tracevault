@@ -68,6 +68,20 @@ class WikiEvidenceReference:
             self.excerpt,
         )
 
+    def has_required_source_identity(self) -> bool:
+        """Return True when both document_id and chunk_id are present.
+
+        Missing means None, empty string, or whitespace-only string.
+        This is the minimum identity required for strict-export
+        proof-chain traceability.
+        """
+        return bool(
+            isinstance(self.document_id, str)
+            and self.document_id.strip()
+            and isinstance(self.chunk_id, str)
+            and self.chunk_id.strip()
+        )
+
     def to_dict(self) -> dict:
         return {
             "label": self.label,
@@ -108,6 +122,17 @@ class WikiClaim:
         has at least one evidence reference.
         """
         return not self.unsupported and self.has_evidence
+
+    def evidence_refs_missing_source_identity(self) -> list[WikiEvidenceReference]:
+        """Return evidence refs that lack document_id or chunk_id.
+
+        A ref is considered missing source identity when either field
+        is None, empty, or whitespace-only.
+        """
+        return [
+            ref for ref in self.evidence_refs
+            if not ref.has_required_source_identity()
+        ]
 
     def to_dict(self) -> dict:
         return {
@@ -307,10 +332,30 @@ class WikiNote:
             )
         return errors
 
+    def validate_evidence_source_identity(self) -> list[str]:
+        """Validate that every supported claim evidence ref has document/chunk identity.
+
+        Returns a list of error messages. Empty list means valid.
+        Each error message identifies the claim statement, evidence label,
+        and the missing fields so the upstream builder can debug the gap.
+        """
+        errors: list[str] = []
+        for claim in self.claims:
+            if claim.unsupported:
+                continue
+            for ref in claim.evidence_refs_missing_source_identity():
+                errors.append(
+                    f"evidence ref missing required source identity: "
+                    f"claim='{claim.statement}', label='{ref.label}', "
+                    f"document_id='{ref.document_id}', chunk_id='{ref.chunk_id}'"
+                )
+        return errors
+
     def validate(self) -> list[str]:
         """Validate a WikiNote for export readiness.
 
-        Checks structural identity consistency and claim coverage.
+        Checks structural identity consistency, claim coverage, and
+        evidence source identity.
         Returns a list of error messages. Empty list means valid.
 
         Identity rule:
@@ -328,6 +373,7 @@ class WikiNote:
             )
 
         errors.extend(self.validate_claim_coverage())
+        errors.extend(self.validate_evidence_source_identity())
         return errors
 
     def to_dict(self) -> dict:

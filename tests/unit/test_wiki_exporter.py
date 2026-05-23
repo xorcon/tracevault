@@ -1400,3 +1400,274 @@ class TestFilesystemFailureRejection:
         result = export_note(note, not_a_dir, strict=False)
         assert result.rejected is True
         assert result.markdown == ""
+
+
+class TestStrictExportRequiresEvidenceSourceIdentity:
+    """Codex P1: Strict export rejects evidence refs missing document_id/chunk_id.
+
+    A supported claim in strict mode must have evidence refs that each
+    carry both document_id and chunk_id.  Missing means None, empty
+    string, or whitespace-only.
+    """
+
+    def test_strict_rejects_missing_document_id(self, tmp_path: Path):
+        """A: evidence_ref with document_id='' is rejected in strict mode."""
+        ref = WikiEvidenceReference(label="E1", document_id="", chunk_id="chunk_001")
+        note = WikiNote(
+            note_id="note_001",
+            title="Missing Doc",
+            claims=[WikiClaim(statement="No doc", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "document_id" in result.reason
+
+    def test_strict_rejects_missing_chunk_id(self, tmp_path: Path):
+        """B: evidence_ref with chunk_id='' is rejected in strict mode."""
+        ref = WikiEvidenceReference(label="E1", document_id="doc_001", chunk_id="")
+        note = WikiNote(
+            note_id="note_001",
+            title="Missing Chunk",
+            claims=[WikiClaim(statement="No chunk", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "chunk_id" in result.reason
+
+    def test_strict_rejects_whitespace_document_id(self, tmp_path: Path):
+        """C: evidence_ref with document_id='   ' is rejected."""
+        ref = WikiEvidenceReference(label="E1", document_id="   ", chunk_id="chunk_001")
+        note = WikiNote(
+            note_id="note_001",
+            title="Whitespace Doc",
+            claims=[WikiClaim(statement="Whitespace doc", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert "document_id" in result.reason
+
+    def test_strict_rejects_whitespace_chunk_id(self, tmp_path: Path):
+        """D: evidence_ref with chunk_id='\t' is rejected."""
+        ref = WikiEvidenceReference(label="E1", document_id="doc_001", chunk_id="\t")
+        note = WikiNote(
+            note_id="note_001",
+            title="Whitespace Chunk",
+            claims=[WikiClaim(statement="Whitespace chunk", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert "chunk_id" in result.reason
+
+    def test_strict_rejects_both_empty(self, tmp_path: Path):
+        """E: both document_id and chunk_id empty."""
+        ref = WikiEvidenceReference(label="E1", document_id="", chunk_id="")
+        note = WikiNote(
+            note_id="note_001",
+            title="Both Empty",
+            claims=[WikiClaim(statement="No identity", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        # Reason mentions at least one of the missing fields
+        assert "document_id" in result.reason or "chunk_id" in result.reason
+
+    def test_rejection_does_not_write_file(self, tmp_path: Path):
+        """F: Rejection does not write any file."""
+        ref = WikiEvidenceReference(label="E1", document_id="", chunk_id="")
+        note = WikiNote(
+            note_id="note_001",
+            title="No Write",
+            claims=[WikiClaim(statement="Blocked", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        export_note(note, tmp_path)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_rejection_reason_mentions_field_names(self, tmp_path: Path):
+        """G: Reason mentions document_id or chunk_id for debugging."""
+        ref = WikiEvidenceReference(label="E1", document_id="", chunk_id="")
+        note = WikiNote(
+            note_id="note_001",
+            title="Debug",
+            claims=[WikiClaim(statement="X", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.reason  # non-empty
+        assert "document_id" in result.reason or "chunk_id" in result.reason
+
+    def test_valid_evidence_ref_exports_successfully(self, tmp_path: Path):
+        """H: Valid evidence_ref with document_id+chunk_id exports."""
+        note = _make_validated_note()
+        result = export_note(note, tmp_path)
+        assert result.written is True
+        assert result.rejected is False
+
+    def test_non_strict_allows_sparse_evidence_ref(self, tmp_path: Path):
+        """I: Non-strict export still permits sparse evidence refs."""
+        ref = WikiEvidenceReference(label="E1", document_id="", chunk_id="")
+        note = WikiNote(
+            note_id="note_001",
+            title="Sparse",
+            claims=[WikiClaim(statement="Sparse ref", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path, strict=False)
+        assert result.written is True
+        assert result.rejected is False
+
+    def test_rejection_before_render(self, tmp_path: Path):
+        """Rejection happens before render_note() — markdown is empty."""
+        ref = WikiEvidenceReference(label="E1", document_id="", chunk_id="")
+        note = WikiNote(
+            note_id="note_001",
+            title="No Render",
+            claims=[WikiClaim(statement="Blocked", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.markdown == ""
+
+    def test_unsupported_claims_not_checked_for_source_identity(
+        self, tmp_path: Path
+    ):
+        """Unsupported claims are skipped by the source identity check
+        (they are caught by the separate unsupported-claim check)."""
+        note = WikiNote(
+            note_id="note_001",
+            title="Unsupported",
+            claims=[WikiClaim(statement="No proof", unsupported=True)],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path, allow_unsupported=True)
+        assert result.written is True
+        assert result.rejected is False
+
+    def test_export_notes_batch_continues_after_identity_rejection(
+        self, tmp_path: Path
+    ):
+        """export_notes() continues after one identity-rejected note."""
+        bad_ref = WikiEvidenceReference(
+            label="E1", document_id="", chunk_id=""
+        )
+        bad_note = WikiNote(
+            note_id="note_bad",
+            title="Bad",
+            claims=[WikiClaim(statement="Bad ref", evidence_refs=[bad_ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_bad",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        good_note = _make_validated_note(title="Good", note_id="note_good")
+
+        results = export_notes([bad_note, good_note], tmp_path)
+        assert len(results) == 2
+        assert results[0].rejected is True
+        assert results[0].written is False
+        assert results[1].written is True
+        assert results[1].rejected is False
+
+    def test_input_note_not_mutated_by_check(self, tmp_path: Path):
+        """The source identity check must not mutate input evidence refs."""
+        ref = WikiEvidenceReference(label="E1", document_id="", chunk_id="chunk_001")
+        note = WikiNote(
+            note_id="note_001",
+            title="Immutable",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        original = note.to_dict()
+        export_note(note, tmp_path)
+        assert note.to_dict() == original
+
+    def test_mixed_refs_first_bad_ref_causes_rejection(self, tmp_path: Path):
+        """When a claim has both good and bad refs, the first bad ref
+        triggers rejection."""
+        good_ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        bad_ref = WikiEvidenceReference(
+            label="E2", document_id="", chunk_id=""
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Mixed",
+            claims=[WikiClaim(statement="Mixed refs", evidence_refs=[good_ref, bad_ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert "E2" in result.reason
+
+    def test_identity_key_fallback_not_removed(self):
+        """identity_key still returns fallback for sparse refs."""
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id=""
+        )
+        # Fallback behavior preserved — has_required_source_identity
+        # is a separate check, not a replacement for identity_key.
+        assert ref.has_required_source_identity() is False
+        assert ref.identity_key()[0] != "chunk"
