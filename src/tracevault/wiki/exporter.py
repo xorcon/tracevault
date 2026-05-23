@@ -184,7 +184,16 @@ def export_note(
             reason="File already exists",
         )
 
-    markdown = render_note(note)
+    # Render with error handling — convert render failures into
+    # rejected results so export_notes() can continue the batch.
+    try:
+        markdown = render_note(note)
+    except Exception as exc:
+        return _rejected(
+            note_id=note.note_id,
+            file_path=str(file_path),
+            reason=f"render failure: {type(exc).__name__}: {exc}",
+        )
 
     # Write
     output_dir.mkdir(parents=True, exist_ok=True)

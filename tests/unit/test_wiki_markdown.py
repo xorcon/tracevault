@@ -794,6 +794,222 @@ class TestMultiLineExcerptBlockquote:
         assert result == ["> line one", "> line two"]
 
 
+class TestEvidenceDedupByStableIdentity:
+    """Codex P1: Deduplicate evidence by stable chunk identity.
+
+    identity_key() is anchored on (document_id, chunk_id), not on
+    optional hashes or label.  Sparse and full refs for the same
+    chunk must render as one evidence entry with merged metadata.
+    """
+
+    def test_sparse_claim_ref_plus_full_source_evidence_one_entry(self):
+        """A: Claim ref sparse + source_evidence full for same doc/chunk
+        render as one evidence entry."""
+        claim_ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            # no hashes, no excerpt
+        )
+        source_ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            source_path="docs/test.md",
+            source_raw_hash="abc123",
+            raw_text_hash="def456",
+            evidence_text_hash="ghi789",
+            excerpt="Full evidence text here",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[claim_ref])],
+            source_evidence=[source_ref],
+            metadata=meta,
+        ))
+        # Only one E1 heading in evidence section
+        evidence_section = md.split("## Evidence References")[1].split(
+            "## TraceVault Metadata"
+        )[0]
+        assert evidence_section.count("### E1") == 1
+
+    def test_rendered_evidence_preserves_richer_metadata(self):
+        """B: Rendered evidence entry preserves richer metadata from
+        source_evidence."""
+        claim_ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        source_ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            source_path="docs/test.md",
+            source_raw_hash="abc123",
+            evidence_text_hash="ghi789",
+            excerpt="Full evidence text here",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[claim_ref])],
+            source_evidence=[source_ref],
+            metadata=meta,
+        ))
+        # Richer metadata must appear in rendered output
+        assert "`docs/test.md`" in md
+        assert "`abc123`" in md
+        assert "`ghi789`" in md
+        assert "> Full evidence text here" in md
+
+    def test_claim_citation_points_to_canonical_label(self):
+        """C: Claim citation points to the canonical display label for
+        the single evidence entry."""
+        claim_ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        source_ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            source_raw_hash="abc123",
+            evidence_text_hash="def456",
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A fact", evidence_refs=[claim_ref])],
+            source_evidence=[source_ref],
+            metadata=meta,
+        ))
+        # Claim line should cite E1 (canonical label)
+        assert "A fact [E1]" in md
+
+    def test_no_duplicate_evidence_headings_same_doc_chunk(self):
+        """D: No duplicate evidence headings for same document_id/chunk_id."""
+        ref1 = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            source_raw_hash="abc",
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            # no hashes — sparse
+        )
+        meta = _make_validated_metadata(evidence_count=1)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=[ref1, ref2])],
+            source_evidence=[ref1, ref2],
+            metadata=meta,
+        ))
+        evidence_section = md.split("## Evidence References")[1].split(
+            "## TraceVault Metadata"
+        )[0]
+        headings = [
+            line for line in evidence_section.split("\n")
+            if line.startswith("### ")
+        ]
+        assert len(headings) == len(set(headings))
+
+    def test_same_label_different_chunk_distinct_entries(self):
+        """E: Same label but different chunk_id still renders as distinct
+        evidence entries with unique labels."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_002"
+        )
+        meta = _make_validated_metadata(evidence_count=2)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=[ref1, ref2])],
+            source_evidence=[ref1, ref2],
+            metadata=meta,
+        ))
+        assert _heading_exists(md, "### E1")
+        assert _heading_exists(md, "### E1-2")
+
+    def test_same_document_different_chunk_distinct(self):
+        """F: Same document_id but different chunk_id remains distinct."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="E2", document_id="doc_001", chunk_id="chunk_002"
+        )
+        meta = _make_validated_metadata(evidence_count=2)
+        md = render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=[ref1, ref2])],
+            source_evidence=[ref1, ref2],
+            metadata=meta,
+        ))
+        assert _heading_exists(md, "### E1")
+        assert _heading_exists(md, "### E2")
+
+    def test_identity_key_does_not_include_label(self):
+        """G: identity_key does not include label when doc/chunk present."""
+        ref1 = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref2 = WikiEvidenceReference(
+            label="DIFFERENT", document_id="doc_001", chunk_id="chunk_001"
+        )
+        assert ref1.identity_key() == ref2.identity_key()
+
+    def test_identity_key_does_not_split_on_hash_diff(self):
+        """H: identity_key does not split on optional hash differences
+        when document_id/chunk_id match."""
+        ref1 = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            source_raw_hash="hash_a",
+            evidence_text_hash="hash_b",
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            # no hashes
+        )
+        assert ref1.identity_key() == ref2.identity_key()
+
+    def test_original_evidence_objects_not_mutated(self):
+        """I: Original evidence objects are not mutated during render."""
+        claim_ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        source_ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            source_path="docs/test.md",
+            source_raw_hash="abc123",
+            evidence_text_hash="def456",
+            excerpt="Rich evidence",
+        )
+        # Snapshot original state
+        claim_ref_before = claim_ref.to_dict()
+        source_ref_before = source_ref.to_dict()
+
+        meta = _make_validated_metadata(evidence_count=1)
+        render_note(_make_note(
+            claims=[WikiClaim(statement="A", evidence_refs=[claim_ref])],
+            source_evidence=[source_ref],
+            metadata=meta,
+        ))
+
+        # Neither object should be mutated
+        assert claim_ref.to_dict() == claim_ref_before
+        assert source_ref.to_dict() == source_ref_before
+
+
 class TestGloballyUniqueEvidenceLabels:
     """Codex P1: evidence display labels must be globally unique across the
     entire note, not just unique per original-label group."""

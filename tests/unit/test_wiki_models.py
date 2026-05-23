@@ -45,6 +45,7 @@ class TestWikiEvidenceReference:
         assert ref.excerpt == "Source evidence text"
 
     def test_identity_key(self):
+        """identity_key uses (chunk, document_id, chunk_id) when both present."""
         ref = WikiEvidenceReference(
             label="E1",
             document_id="doc_001",
@@ -54,7 +55,68 @@ class TestWikiEvidenceReference:
             evidence_text_hash="eth",
         )
         key = ref.identity_key()
-        assert key == ("doc_001", "chunk_001", "srh", "rth", "eth", "E1")
+        assert key == ("chunk", "doc_001", "chunk_001")
+
+    def test_identity_key_ignores_optional_hashes(self):
+        """Optional hash differences do not split identity."""
+        ref1 = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            source_raw_hash="srh",
+            evidence_text_hash="eth",
+        )
+        ref2 = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+            # no hashes — sparse ref
+        )
+        assert ref1.identity_key() == ref2.identity_key()
+
+    def test_identity_key_ignores_label(self):
+        """Different labels for same document/chunk share identity."""
+        ref1 = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        ref2 = WikiEvidenceReference(
+            label="E2",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        assert ref1.identity_key() == ref2.identity_key()
+
+    def test_identity_key_fallback_document_evidence_hash(self):
+        """Fallback to (document-evidence, document_id, evidence_text_hash)."""
+        ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="",
+            evidence_text_hash="eth123",
+        )
+        assert ref.identity_key() == ("document-evidence", "doc_001", "eth123")
+
+    def test_identity_key_fallback_document_source_hash(self):
+        """Fallback to (document-source, document_id, source_raw_hash)."""
+        ref = WikiEvidenceReference(
+            label="E1",
+            document_id="doc_001",
+            chunk_id="",
+            source_raw_hash="srh123",
+        )
+        assert ref.identity_key() == ("document-source", "doc_001", "srh123")
+
+    def test_identity_key_fallback_label_excerpt(self):
+        """Fallback to (label-excerpt, label, excerpt) when no doc/chunk/hash."""
+        ref = WikiEvidenceReference(
+            label="E1",
+            document_id="",
+            chunk_id="",
+            excerpt="some text",
+        )
+        assert ref.identity_key() == ("label-excerpt", "E1", "some text")
 
     def test_identity_key_differs_for_different_chunk(self):
         ref1 = WikiEvidenceReference(

@@ -47,17 +47,25 @@ class WikiEvidenceReference:
     def identity_key(self) -> tuple:
         """Return a stable identity tuple for deduplication.
 
-        Uses (document_id, chunk_id, source_raw_hash, raw_text_hash,
-        evidence_text_hash, label) to avoid collapsing different chunks
-        that share the same label.
+        Identity is anchored on source location, not presentation label
+        or optional metadata completeness.
+
+        Priority:
+        1. (chunk, document_id, chunk_id) — primary stable identity
+        2. (document-evidence, document_id, evidence_text_hash)
+        3. (document-source, document_id, source_raw_hash)
+        4. (label-excerpt, label, excerpt) — conservative fallback
         """
+        if self.document_id and self.chunk_id:
+            return ("chunk", self.document_id, self.chunk_id)
+        if self.document_id and self.evidence_text_hash:
+            return ("document-evidence", self.document_id, self.evidence_text_hash)
+        if self.document_id and self.source_raw_hash:
+            return ("document-source", self.document_id, self.source_raw_hash)
         return (
-            self.document_id,
-            self.chunk_id,
-            self.source_raw_hash,
-            self.raw_text_hash,
-            self.evidence_text_hash,
+            "label-excerpt",
             self.label,
+            self.excerpt,
         )
 
     def to_dict(self) -> dict:

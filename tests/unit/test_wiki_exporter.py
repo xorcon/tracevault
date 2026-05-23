@@ -1103,11 +1103,11 @@ class TestSkipBeforeRender:
         assert result.skipped is True
         assert result.markdown == ""
 
-    def test_allow_overwrite_invalid_rendering_raises_or_rejects(
+    def test_allow_overwrite_invalid_rendering_returns_rejected(
         self, tmp_path: Path
     ):
         """E: With allow_overwrite=True, invalid generated_at note with no
-        existing file still raises during rendering (strict=False)."""
+        existing file returns rejected=True (render failure)."""
         meta = WikiExportMetadata(
             note_id="note_001",
             generated_at="not-a-datetime",
@@ -1118,8 +1118,12 @@ class TestSkipBeforeRender:
             title="Test Note",
             metadata=meta,
         )
-        with pytest.raises(ValueError):
-            export_note(note, tmp_path, allow_overwrite=True, strict=False)
+        result = export_note(note, tmp_path, allow_overwrite=True, strict=False)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "render" in result.reason.lower()
+        assert result.markdown == ""
 
     def test_export_notes_continues_after_skip(self, tmp_path: Path):
         """F: export_notes() continues processing later notes when earlier
@@ -1158,3 +1162,109 @@ class TestSkipBeforeRender:
         assert result.rejected is False
         assert result.reason == "File already exists"
         assert existing.read_text() == "existing content"
+
+
+class TestRenderFailureRejection:
+    """Codex P1: Convert render failures into rejected export results.
+
+    Render failures (e.g., invalid generated_at that raises during
+    render) must produce rejected WikiExportResult objects instead of
+    propagating exceptions, so export_notes() can continue the batch.
+    """
+
+    def _make_bad_generated_at_note(
+        self, note_id="note_001", title="Test Note"
+    ) -> WikiNote:
+        """Create a note with invalid generated_at that fails during render."""
+        meta = WikiExportMetadata(
+            note_id=note_id,
+            generated_at="not-a-datetime",
+            validation_status="validated",
+        )
+        return WikiNote(
+            note_id=note_id,
+            title=title,
+            metadata=meta,
+        )
+
+    def test_render_failure_returns_rejected_not_exception(self, tmp_path: Path):
+        """A: export_note() with invalid generated_at returns rejected=True,
+        not exception."""
+        note = self._make_bad_generated_at_note()
+        result = export_note(note, tmp_path, strict=False)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+
+    def test_rejected_render_has_empty_markdown(self, tmp_path: Path):
+        """B: rejected render failure has written=False, skipped=False,
+        markdown='.'."""
+        note = self._make_bad_generated_at_note()
+        result = export_note(note, tmp_path, strict=False)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert result.markdown == ""
+
+    def test_rejected_reason_contains_render(self, tmp_path: Path):
+        """C: reason contains 'render' or the underlying error message."""
+        note = self._make_bad_generated_at_note()
+        result = export_note(note, tmp_path, strict=False)
+        assert result.rejected is True
+        assert "render" in result.reason.lower()
+
+    def test_no_file_written_on_render_failure(self, tmp_path: Path):
+        """D: no file is written when render fails."""
+        note = self._make_bad_generated_at_note()
+        result = export_note(note, tmp_path, strict=False)
+        assert result.rejected is True
+        assert not (tmp_path / "test-note--id-6e6f74655f303031.md").exists()
+
+    def test_export_notes_continues_after_render_failure(self, tmp_path: Path):
+        """E: export_notes() continues after one render failure and
+        writes later valid notes."""
+        bad_note = self._make_bad_generated_at_note(note_id="note_bad")
+        good_note = _make_validated_note(title="Good", note_id="note_good")
+
+        results = export_notes([bad_note, good_note], tmp_path, strict=False)
+        assert len(results) == 2
+        assert results[0].rejected is True
+        assert results[0].written is False
+        assert results[1].written is True
+        assert results[1].rejected is False
+
+    def test_existing_file_skip_before_render_still_works(
+        self, tmp_path: Path
+    ):
+        """F: existing file skip still happens before render even when
+        note would fail rendering."""
+        note = self._make_bad_generated_at_note()
+        existing = tmp_path / "test-note--id-6e6f74655f303031.md"
+        existing.write_text("existing content")
+
+        result = export_note(note, tmp_path, strict=False)
+        # Skip should happen before render, so we get skipped, not rejected
+        assert result.skipped is True
+        assert result.rejected is False
+        assert result.reason == "File already exists"
+
+    def test_allow_overwrite_render_failure_returns_rejected(
+        self, tmp_path: Path
+    ):
+        """G: allow_overwrite=True with render failure returns rejected=True,
+        not exception."""
+        note = self._make_bad_generated_at_note()
+        result = export_note(note, tmp_path, allow_overwrite=True, strict=False)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert result.markdown == ""
+        assert "render" in result.reason.lower()
+
+    def test_rejected_result_file_path_computed(self, tmp_path: Path):
+        """rejected result still has the computed target path."""
+        note = self._make_bad_generated_at_note()
+        result = export_note(note, tmp_path, strict=False)
+        assert result.rejected is True
+        assert "test-note" in result.file_path
+        assert "6e6f74655f303031" in result.file_path

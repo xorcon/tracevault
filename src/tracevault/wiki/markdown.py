@@ -9,7 +9,36 @@ Renders WikiNote objects into Markdown strings with:
 - TraceVault metadata section
 """
 
+from copy import copy
+
 from tracevault.wiki.models import WikiEvidenceReference, WikiNote
+
+
+def _merge_refs(refs: list[WikiEvidenceReference]) -> WikiEvidenceReference:
+    """Merge multiple evidence refs sharing the same stable identity.
+
+    Produces a single new ref that preserves the richest non-empty
+    metadata from any input ref.  Original refs are never mutated.
+
+    The first ref's label is used as the display label for deterministic
+    claim-to-evidence mapping.
+    """
+    if len(refs) == 1:
+        return refs[0]
+
+    winner = copy(refs[0])
+    for ref in refs[1:]:
+        if not winner.source_path and ref.source_path:
+            winner.source_path = ref.source_path
+        if not winner.source_raw_hash and ref.source_raw_hash:
+            winner.source_raw_hash = ref.source_raw_hash
+        if not winner.raw_text_hash and ref.raw_text_hash:
+            winner.raw_text_hash = ref.raw_text_hash
+        if not winner.evidence_text_hash and ref.evidence_text_hash:
+            winner.evidence_text_hash = ref.evidence_text_hash
+        if not winner.excerpt and ref.excerpt:
+            winner.excerpt = ref.excerpt
+    return winner
 
 
 def yaml_scalar(value: object) -> str:
@@ -96,8 +125,7 @@ def render_note(note: WikiNote) -> str:
             )
         else:
             labels = ", ".join(
-                display_labels[ref.identity_key()]
-                for ref in claim.evidence_refs
+                _dedup_labels(display_labels, claim.evidence_refs)
             )
             lines.append(f"- {claim.statement} [{labels}]")
     lines.append("")
@@ -225,28 +253,50 @@ def _render_frontmatter(note: WikiNote, lines: list[str]) -> None:
 def _build_identity_map(
     note: WikiNote,
 ) -> list[tuple[tuple, WikiEvidenceReference]]:
-    """Build an ordered list of (identity_key, ref) pairs.
+    """Build an ordered list of (identity_key, merged_ref) pairs.
 
-    Deduplicates by stable identity (document_id, chunk_id, hashes, label),
-    not just label. Claim refs come first, then source_evidence.
+    Collects all refs from claims and source_evidence, groups by stable
+    identity, and merges duplicates into a single richer ref per identity.
+    Claim refs are processed first to preserve ordering.
     """
-    seen: set[tuple] = set()
-    pairs: list[tuple[tuple, WikiEvidenceReference]] = []
+    groups: dict[tuple, list[WikiEvidenceReference]] = {}
+    order: list[tuple] = []
+
+    def _add(ref: WikiEvidenceReference) -> None:
+        key = ref.identity_key()
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(ref)
 
     for claim in note.claims:
         for ref in claim.evidence_refs:
-            key = ref.identity_key()
-            if key not in seen:
-                seen.add(key)
-                pairs.append((key, ref))
+            _add(ref)
 
     for ref in note.source_evidence:
-        key = ref.identity_key()
-        if key not in seen:
-            seen.add(key)
-            pairs.append((key, ref))
+        _add(ref)
 
-    return pairs
+    return [(key, _merge_refs(groups[key])) for key in order]
+
+
+def _dedup_labels(
+    display_labels: dict[tuple, str],
+    refs: list[WikiEvidenceReference],
+) -> list[str]:
+    """Resolve citation labels for a claim's evidence refs, deduplicating.
+
+    When two refs share the same stable identity (e.g., a sparse claim ref
+    and a full source_evidence ref), they map to the same display label.
+    This helper preserves order while removing duplicate label occurrences.
+    """
+    seen: set[str] = set()
+    labels: list[str] = []
+    for ref in refs:
+        label = display_labels[ref.identity_key()]
+        if label not in seen:
+            seen.add(label)
+            labels.append(label)
+    return labels
 
 
 def _resolve_display_labels(
