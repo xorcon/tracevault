@@ -236,6 +236,24 @@ class TestUnsupportedClaimBehavior:
         md = render_note(_make_note(claims=[claim], metadata=meta))
         assert "*(unsupported — no evidence)*" in md
 
+    def test_invalid_supported_claim_has_balanced_italic_markers(self):
+        """A claim with unsupported=False and no evidence refs must render
+        with balanced *(...)* italic markers, not *(... without closing *."""
+        claim = WikiClaim(statement="No refs", unsupported=False, evidence_refs=[])
+        meta = _make_validated_metadata()
+        md = render_note(_make_note(claims=[claim], metadata=meta))
+        assert "*(unsupported — no evidence refs)*" in md
+
+    def test_invalid_supported_claim_does_not_have_malformed_marker(self):
+        """The malformed open-only marker *(unsupported — no evidence refs)
+        without closing * must not appear in rendered output."""
+        claim = WikiClaim(statement="No refs", unsupported=False, evidence_refs=[])
+        meta = _make_validated_metadata()
+        md = render_note(_make_note(claims=[claim], metadata=meta))
+        assert "*(unsupported — no evidence refs)" not in md.replace(
+            "*(unsupported — no evidence refs)*", ""
+        )
+
 
 class TestEvidenceDeduplication:
     def test_same_label_different_chunk_renders_twice(self):

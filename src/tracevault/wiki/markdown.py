@@ -92,7 +92,7 @@ def render_note(note: WikiNote) -> str:
             # Invalid supported claim — render as unsupported to avoid
             # silently emitting claim [].
             lines.append(
-                f"- {claim.statement} *(unsupported — no evidence refs)"
+                f"- {claim.statement} *(unsupported — no evidence refs)*"
             )
         else:
             labels = ", ".join(
