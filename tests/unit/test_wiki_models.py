@@ -831,3 +831,179 @@ class TestWikiNoteValidateIncludesEvidenceIdentity:
         )
         errors = note.validate()
         assert any("source identity" in e for e in errors)
+
+
+class TestWikiEvidenceReferenceHasRequiredLabel:
+    """Model helper: has_required_label()."""
+
+    def test_true_when_label_present(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        assert ref.has_required_label() is True
+
+    def test_false_when_label_empty(self):
+        ref = WikiEvidenceReference(
+            label="", document_id="doc_001", chunk_id="chunk_001"
+        )
+        assert ref.has_required_label() is False
+
+    def test_false_when_label_whitespace(self):
+        ref = WikiEvidenceReference(
+            label="   ", document_id="doc_001", chunk_id="chunk_001"
+        )
+        assert ref.has_required_label() is False
+
+    def test_false_when_label_none(self):
+        ref = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        assert ref.has_required_label() is False
+
+    def test_false_when_label_tab(self):
+        ref = WikiEvidenceReference(
+            label="\t", document_id="doc_001", chunk_id="chunk_001"
+        )
+        assert ref.has_required_label() is False
+
+
+class TestWikiClaimEvidenceRefsMissingLabel:
+    """Model helper: evidence_refs_missing_label()."""
+
+    def test_returns_empty_when_all_refs_have_label(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        claim = WikiClaim(statement="A fact", evidence_refs=[ref])
+        assert claim.evidence_refs_missing_label() == []
+
+    def test_returns_ref_with_missing_label(self):
+        ref = WikiEvidenceReference(
+            label="", document_id="doc_001", chunk_id="chunk_001"
+        )
+        claim = WikiClaim(statement="A fact", evidence_refs=[ref])
+        missing = claim.evidence_refs_missing_label()
+        assert len(missing) == 1
+        assert missing[0] is ref
+
+    def test_returns_ref_with_none_label(self):
+        ref = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        claim = WikiClaim(statement="A fact", evidence_refs=[ref])
+        missing = claim.evidence_refs_missing_label()
+        assert len(missing) == 1
+
+    def test_returns_ref_with_whitespace_label(self):
+        ref = WikiEvidenceReference(
+            label="  ", document_id="doc_001", chunk_id="chunk_001"
+        )
+        claim = WikiClaim(statement="A fact", evidence_refs=[ref])
+        missing = claim.evidence_refs_missing_label()
+        assert len(missing) == 1
+
+    def test_returns_only_bad_ref_in_mixed_list(self):
+        ref_good = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        ref_bad = WikiEvidenceReference(
+            label="", document_id="doc_002", chunk_id="chunk_002"
+        )
+        claim = WikiClaim(
+            statement="A fact", evidence_refs=[ref_good, ref_bad]
+        )
+        missing = claim.evidence_refs_missing_label()
+        assert len(missing) == 1
+        assert missing[0] is ref_bad
+
+    def test_does_not_mutate_input(self):
+        ref = WikiEvidenceReference(
+            label="", document_id="doc_001", chunk_id="chunk_001"
+        )
+        claim = WikiClaim(statement="A fact", evidence_refs=[ref])
+        claim.evidence_refs_missing_label()
+        assert len(claim.evidence_refs) == 1
+        assert claim.evidence_refs[0].label == ""
+
+
+class TestWikiNoteValidateEvidenceLabels:
+    """Model method: validate_evidence_labels()."""
+
+    def test_no_errors_when_all_refs_have_label(self):
+        ref = WikiEvidenceReference(
+            label="E1", document_id="doc_001", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+        )
+        assert note.validate_evidence_labels() == []
+
+    def test_error_when_label_empty(self):
+        ref = WikiEvidenceReference(
+            label="", document_id="doc_001", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="No label", evidence_refs=[ref])],
+        )
+        errors = note.validate_evidence_labels()
+        assert len(errors) == 1
+        assert "label" in errors[0]
+        assert "No label" in errors[0]
+
+    def test_error_when_label_none(self):
+        ref = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="None label", evidence_refs=[ref])],
+        )
+        errors = note.validate_evidence_labels()
+        assert len(errors) == 1
+        assert "label" in errors[0]
+
+    def test_error_when_label_whitespace(self):
+        ref = WikiEvidenceReference(
+            label="   ", document_id="doc_001", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="Whitespace label", evidence_refs=[ref])],
+        )
+        errors = note.validate_evidence_labels()
+        assert len(errors) == 1
+        assert "label" in errors[0]
+
+    def test_skips_unsupported_claims(self):
+        """Unsupported claims are not checked for evidence labels."""
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="No proof", unsupported=True)],
+        )
+        assert note.validate_evidence_labels() == []
+
+    def test_does_not_mutate_note(self):
+        ref = WikiEvidenceReference(
+            label="", document_id="doc_001", chunk_id="chunk_001"
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="T",
+            claims=[WikiClaim(statement="A fact", evidence_refs=[ref])],
+        )
+        original = note.to_dict()
+        note.validate_evidence_labels()
+        assert note.to_dict() == original

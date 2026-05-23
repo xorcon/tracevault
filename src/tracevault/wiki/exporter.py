@@ -38,6 +38,10 @@ def encode_note_id_for_filename(note_id: str) -> str:
         "NoteA"     -> "4e6f746541"
         "notea"     -> "6e6f746561"
     """
+    if not isinstance(note_id, str):
+        raise ValueError(
+            f"note_id must be a string, got {type(note_id).__name__}"
+        )
     if not note_id or not note_id.strip():
         raise ValueError("note_id must not be empty or whitespace-only")
     return note_id.encode("utf-8").hex()
@@ -57,7 +61,16 @@ def build_note_filename(note: WikiNote) -> str:
 
     Raises:
         ValueError: If note.note_id is empty or whitespace-only.
+        ValueError: If note.note_id or note.title is not a string.
     """
+    if not isinstance(note.note_id, str):
+        raise ValueError(
+            f"note.note_id must be a string, got {type(note.note_id).__name__}"
+        )
+    if not isinstance(note.title, str):
+        raise ValueError(
+            f"note.title must be a string, got {type(note.title).__name__}"
+        )
     if not note.note_id.strip():
         raise ValueError(
             "note_id must not be empty or whitespace-only; "
@@ -107,10 +120,10 @@ def export_note(
     """
     output_dir = Path(output_dir)
 
-    # Build filename (raises ValueError for empty note_id)
+    # Build filename (raises ValueError for invalid note_id/title)
     try:
         filename = build_note_filename(note)
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         file_path = output_dir / "unknown.md"
         return _rejected(
             note_id=note.note_id,
@@ -185,6 +198,23 @@ def export_note(
                     reason=(
                         f"evidence ref missing required source identity: "
                         f"claim='{claim.statement}', label='{ref.label}', "
+                        f"document_id='{ref.document_id}', "
+                        f"chunk_id='{ref.chunk_id}'"
+                    ),
+                )
+
+        # Evidence label check — every supported claim evidence ref must have
+        # a non-empty label so that rendered citations are readable.
+        for claim in note.claims:
+            if claim.unsupported:
+                continue
+            for ref in claim.evidence_refs_missing_label():
+                return _rejected(
+                    note_id=note.note_id,
+                    file_path=str(file_path),
+                    reason=(
+                        f"evidence ref missing required label: "
+                        f"claim='{claim.statement}', "
                         f"document_id='{ref.document_id}', "
                         f"chunk_id='{ref.chunk_id}'"
                     ),

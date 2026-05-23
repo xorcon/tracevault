@@ -68,6 +68,13 @@ class WikiEvidenceReference:
             self.excerpt,
         )
 
+    def has_required_label(self) -> bool:
+        """Return True when the label is a non-empty, non-whitespace string."""
+        return bool(
+            isinstance(self.label, str)
+            and self.label.strip()
+        )
+
     def has_required_source_identity(self) -> bool:
         """Return True when both document_id and chunk_id are present.
 
@@ -132,6 +139,17 @@ class WikiClaim:
         return [
             ref for ref in self.evidence_refs
             if not ref.has_required_source_identity()
+        ]
+
+    def evidence_refs_missing_label(self) -> list[WikiEvidenceReference]:
+        """Return evidence refs that lack a non-empty label.
+
+        A ref is considered missing a label when the label is None,
+        empty, or whitespace-only.
+        """
+        return [
+            ref for ref in self.evidence_refs
+            if not ref.has_required_label()
         ]
 
     def to_dict(self) -> dict:
@@ -351,11 +369,29 @@ class WikiNote:
                 )
         return errors
 
+    def validate_evidence_labels(self) -> list[str]:
+        """Validate that every supported claim evidence ref has a non-empty label.
+
+        Returns a list of error messages. Empty list means valid.
+        A label is considered missing when it is None, empty, or whitespace-only.
+        """
+        errors: list[str] = []
+        for claim in self.claims:
+            if claim.unsupported:
+                continue
+            for ref in claim.evidence_refs_missing_label():
+                errors.append(
+                    f"evidence ref missing required label: "
+                    f"claim='{claim.statement}', "
+                    f"document_id='{ref.document_id}', chunk_id='{ref.chunk_id}'"
+                )
+        return errors
+
     def validate(self) -> list[str]:
         """Validate a WikiNote for export readiness.
 
-        Checks structural identity consistency, claim coverage, and
-        evidence source identity.
+        Checks structural identity consistency, claim coverage, evidence
+        source identity, and evidence labels.
         Returns a list of error messages. Empty list means valid.
 
         Identity rule:

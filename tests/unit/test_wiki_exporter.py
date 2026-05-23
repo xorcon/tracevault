@@ -1671,3 +1671,321 @@ class TestStrictExportRequiresEvidenceSourceIdentity:
         # is a separate check, not a replacement for identity_key.
         assert ref.has_required_source_identity() is False
         assert ref.identity_key()[0] != "chunk"
+
+
+class TestNonStringNoteFields:
+    """Codex P1: Handle non-string note fields when building filenames."""
+
+    def test_note_id_none_returns_rejected(self, tmp_path: Path):
+        """A: note.note_id=None returns rejected result, no exception."""
+        note = WikiNote(
+            note_id=None,  # type: ignore[arg-type]
+            title="Test",
+            metadata=None,
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "note_id" in result.reason.lower() or "string" in result.reason.lower()
+
+    def test_title_none_returns_rejected(self, tmp_path: Path):
+        """B: note.title=None returns rejected result, no exception."""
+        note = WikiNote(
+            note_id="note_001",
+            title=None,  # type: ignore[arg-type]
+            metadata=None,
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "title" in result.reason.lower() or "string" in result.reason.lower()
+
+    def test_export_notes_continues_after_note_id_none(
+        self, tmp_path: Path
+    ):
+        """C: export_notes() continues after first note has note_id=None."""
+        bad_note = WikiNote(
+            note_id=None,  # type: ignore[arg-type]
+            title="Bad",
+            metadata=None,
+        )
+        good_note = _make_validated_note(title="Good", note_id="note_good")
+        results = export_notes([bad_note, good_note], tmp_path)
+        assert len(results) == 2
+        assert results[0].rejected is True
+        assert results[0].written is False
+        assert results[1].written is True
+        assert results[1].rejected is False
+
+    def test_export_notes_continues_after_title_none(
+        self, tmp_path: Path
+    ):
+        """D: export_notes() continues after first note has title=None."""
+        bad_note = WikiNote(
+            note_id="note_bad",
+            title=None,  # type: ignore[arg-type]
+            metadata=None,
+        )
+        good_note = _make_validated_note(title="Good", note_id="note_good")
+        results = export_notes([bad_note, good_note], tmp_path)
+        assert len(results) == 2
+        assert results[0].rejected is True
+        assert results[0].written is False
+        assert results[1].written is True
+        assert results[1].rejected is False
+
+    def test_build_note_filename_rejects_non_string_note_id(self):
+        """E: build_note_filename raises ValueError for non-string note_id."""
+        note = WikiNote(
+            note_id=12345,  # type: ignore[arg-type]
+            title="Test",
+        )
+        with pytest.raises(ValueError, match="note_id"):
+            build_note_filename(note)
+
+    def test_build_note_filename_rejects_non_string_title(self):
+        """F: build_note_filename raises ValueError for non-string title."""
+        note = WikiNote(
+            note_id="note_001",
+            title=12345,  # type: ignore[arg-type]
+        )
+        with pytest.raises(ValueError, match="title"):
+            build_note_filename(note)
+
+    def test_valid_empty_title_uses_id_only_filename(self):
+        """G: valid empty title still uses id-only filename."""
+        note = WikiNote(note_id="note_001", title="")
+        assert build_note_filename(note) == "id-6e6f74655f303031.md"
+
+    def test_valid_string_note_id_hex_encoding_preserved(self):
+        """H: valid string note_id still uses exact UTF-8 hex encoding."""
+        assert encode_note_id_for_filename("note_001") == "6e6f74655f303031"
+        assert encode_note_id_for_filename("NoteA") == "4e6f746541"
+
+    def test_no_file_written_for_invalid_filename_input(self, tmp_path: Path):
+        """I: no file is written for invalid filename inputs."""
+        note = WikiNote(
+            note_id=None,  # type: ignore[arg-type]
+            title="Test",
+            metadata=None,
+        )
+        export_note(note, tmp_path)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_encode_note_id_rejects_non_string(self):
+        """encode_note_id_for_filename raises ValueError for non-string."""
+        with pytest.raises(ValueError, match="note_id"):
+            encode_note_id_for_filename(None)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="note_id"):
+            encode_note_id_for_filename(12345)  # type: ignore[arg-type]
+
+    def test_note_id_int_returns_rejected(self, tmp_path: Path):
+        """note_id=12345 returns rejected result, no exception."""
+        note = WikiNote(
+            note_id=12345,  # type: ignore[arg-type]
+            title="Test",
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+
+
+class TestStrictExportEvidenceLabels:
+    """Codex P2: Reject empty evidence labels in strict export."""
+
+    def test_strict_rejects_label_none(self, tmp_path: Path):
+        """A: Strict export rejects evidence_ref label=None."""
+        ref = WikiEvidenceReference(
+            label=None,  # type: ignore[arg-type]
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="No Label",
+            claims=[WikiClaim(statement="Claim", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.written is False
+        assert result.skipped is False
+        assert "label" in result.reason.lower()
+
+    def test_strict_rejects_label_empty(self, tmp_path: Path):
+        """B: Strict export rejects evidence_ref label='.'."""
+        ref = WikiEvidenceReference(
+            label="",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Empty Label",
+            claims=[WikiClaim(statement="Claim", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert "label" in result.reason.lower()
+
+    def test_strict_rejects_label_whitespace(self, tmp_path: Path):
+        """C: Strict export rejects evidence_ref label='   '."""
+        ref = WikiEvidenceReference(
+            label="   ",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Whitespace Label",
+            claims=[WikiClaim(statement="Claim", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert "label" in result.reason.lower()
+
+    def test_rejection_reason_mentions_label(self, tmp_path: Path):
+        """D: Rejection reason mentions 'label' for debugging."""
+        ref = WikiEvidenceReference(
+            label="",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Debug",
+            claims=[WikiClaim(statement="X", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert "label" in result.reason.lower()
+
+    def test_no_file_written_on_label_rejection(self, tmp_path: Path):
+        """E: No file is written when label is missing."""
+        ref = WikiEvidenceReference(
+            label="",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="No Write",
+            claims=[WikiClaim(statement="X", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        export_note(note, tmp_path)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_valid_label_exports_successfully(self, tmp_path: Path):
+        """F: Valid non-empty label exports successfully."""
+        note = _make_validated_note()
+        result = export_note(note, tmp_path)
+        assert result.written is True
+        assert result.rejected is False
+
+    def test_non_strict_allows_empty_label(self, tmp_path: Path):
+        """G: Non-strict behavior remains permissive for empty labels."""
+        ref = WikiEvidenceReference(
+            label="",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Sparse Label",
+            claims=[WikiClaim(statement="X", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path, strict=False)
+        assert result.written is True
+        assert result.rejected is False
+
+    def test_label_rejection_before_render(self, tmp_path: Path):
+        """Label rejection happens before render — markdown is empty."""
+        ref = WikiEvidenceReference(
+            label="",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="No Render",
+            claims=[WikiClaim(statement="X", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path)
+        assert result.rejected is True
+        assert result.markdown == ""
+
+    def test_label_check_does_not_mutate_input(self, tmp_path: Path):
+        """Label validation must not mutate evidence refs."""
+        ref = WikiEvidenceReference(
+            label="",
+            document_id="doc_001",
+            chunk_id="chunk_001",
+        )
+        note = WikiNote(
+            note_id="note_001",
+            title="Immutable",
+            claims=[WikiClaim(statement="X", evidence_refs=[ref])],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        original = note.to_dict()
+        export_note(note, tmp_path)
+        assert note.to_dict() == original
+
+    def test_unsupported_claims_not_checked_for_label(
+        self, tmp_path: Path
+    ):
+        """Unsupported claims are not checked for evidence labels."""
+        note = WikiNote(
+            note_id="note_001",
+            title="Unsupported",
+            claims=[WikiClaim(statement="No proof", unsupported=True)],
+            metadata=WikiExportMetadata(
+                note_id="note_001",
+                generated_at=GENERATED_AT,
+                validation_status="validated",
+            ),
+        )
+        result = export_note(note, tmp_path, allow_unsupported=True)
+        assert result.written is True
+        assert result.rejected is False
