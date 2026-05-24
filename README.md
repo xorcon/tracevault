@@ -1,42 +1,69 @@
 # TraceVault
 
-TraceVault is an enterprise-grade, local-first AI knowledge system designed for **traceable, auditable, and evidence-grounded reasoning**.
+TraceVault is an enterprise-grade, local-first AI knowledge governance system designed for **traceable, auditable, and evidence-grounded knowledge workflows**.
 
-Unlike traditional RAG systems, TraceVault enforces a strict proof-chain model:
+Unlike traditional RAG prototypes, TraceVault enforces a strict proof-chain model:
 
 ```text
-raw_text → cleaned_text → evidence → validated answer → knowledge artifact
+raw_text → cleaned_text → retrieval result → evidence pack → derived knowledge artifact
 ```
 
-Every output is:
+Every output is designed to be:
 
 - traceable to source documents
 - verifiable at chunk level
 - bounded by evidence
-- designed for audit-ready AI reasoning
+- safe for audit-oriented enterprise AI workflows
+
+---
+
+## Current Status
+
+TraceVault currently includes implemented foundations for:
+
+- local-first ingestion and differential manifest tracking
+- deterministic semantic refinement with raw/cleaned dual context
+- optional local model refinement with guardrails
+- deterministic hybrid retrieval foundation
+- retrieval contract hardening for custom retriever injection
+- evidence pack and grounded context assembly
+- evidence-backed Markdown wiki export
+- wiki health / lint / drift checking
+
+The next planned phase is:
+
+```text
+Phase 6C — Optional Obsidian Vault Adapter
+```
 
 ---
 
 ## System Architecture
 
 ```text
-                ┌────────────────────────────┐
-                │   Compiled Knowledge Wiki  │
-                │   (auditable, versioned)   │
-                └────────────┬───────────────┘
-                             ↑
-                     Evidence-backed synthesis
-                             ↑
+┌──────────────────────────────────────────────┐
+│        Compiled Knowledge Wiki Layer         │
+│  Evidence-backed export + health validation  │
+└──────────────────────┬───────────────────────┘
+                       ↑
+              Evidence-backed artifacts
+                       ↑
 ┌────────────┐    ┌──────────────┐    ┌──────────────┐
 │ Raw Source │ →  │ Refinement   │ →  │ Retrieval    │
 │ (truth)    │    │ (cleaned)    │    │ (hybrid)     │
-└────────────┘    └──────────────┘    └──────────────┘
-                             ↓
-                      Reasoning Engine
-                             ↓
-                     Validation Layer
-                             ↓
-                     Evidence Pack Output
+└────────────┘    └──────────────┘    └──────┬───────┘
+                                             ↓
+                                      Evidence Pack
+                                             ↓
+                                  Derived Knowledge Output
+```
+
+Phase 6 is split into:
+
+```text
+Phase 6A — Evidence-backed Wiki Export
+Phase 6B — Wiki Health / Lint / Drift Check
+Phase 6C — Optional Obsidian Vault Adapter
 ```
 
 ---
@@ -48,15 +75,15 @@ Every output is:
 ```text
 raw_text      = authoritative truth
 cleaned_text  = processing layer
-evidence_pack = bounded reasoning context
-answer        = derived output
-wiki_note     = human-readable artifact, not truth
+retrieval     = candidate selection layer
+evidence_pack = bounded grounded context
+wiki_note     = human-readable derived artifact, not truth
 ```
 
 Conflict resolution:
 
 ```text
-raw_text > evidence_pack > validated_answer > compiled_wiki_note
+raw_text > evidence_pack > derived_answer > compiled_wiki_note
 ```
 
 ### 2. Dual Context Architecture
@@ -68,14 +95,14 @@ TraceVault stores both:
 
 This enables high-signal retrieval without sacrificing source verification.
 
-### 3. Evidence-first Reasoning
+### 3. Evidence-first Reasoning Boundary
 
 TraceVault does not generate free-form answers from memory.
 
 It follows this model:
 
 ```text
-retrieve → constrain → reason → validate
+retrieve → constrain → assemble evidence → validate before downstream use
 ```
 
 All major claims must map back to evidence.
@@ -87,6 +114,18 @@ No evidence → No claim
 ```
 
 This rule is central to enterprise use cases where reliability, governance, and auditability matter.
+
+### 5. Artifact Validation Before Knowledge Persistence
+
+Compiled wiki notes are derived artifacts. They must remain inspectable and health-checkable before downstream use.
+
+Phase 6B validates wiki artifacts for:
+
+- frontmatter integrity
+- TraceVault metadata consistency
+- claim-to-evidence citation mapping
+- evidence reference identity
+- source hash drift when an explicit manifest is provided
 
 ---
 
@@ -124,41 +163,109 @@ This rule is central to enterprise use cases where reliability, governance, and 
 - model-output guardrails
 - no-new-facts validation after model refinement
 
-### Phase 4 — Hybrid Retrieval
+### Phase 4 — Hybrid Retrieval Foundation
 
-- vector similarity search
-- BM25 keyword search
-- score normalization
-- deterministic candidate merging
-- traceable evidence candidates
+- deterministic in-memory keyword retrieval
+- deterministic vector placeholder
+- metadata filtering
+- text retrieval policy
+- hybrid score merge
+- traceable `RetrievalResult` / `RetrievalTrace`
+- no real vector database or embedding dependency yet
 
-### Phase 5 — Grounded Reasoning and Validation
+### Phase 4.1 — Retrieval Contract Hardening
 
-- evidence pack construction
-- constrained reasoning
-- unsupported-claim detection
-- contradiction detection
-- confidence scoring
+- pipeline-owned default text policy
+- custom keyword retriever compatibility
+- provenance preservation from retrieval candidates
+- execution metadata aligned with response metadata
+
+### Phase 5 — Evidence Pack & Grounded Context Assembly
+
+- `EvidencePack` request / response models
+- deterministic evidence item selection
+- duplicate and budget exclusion tracking
+- retrieval provenance preservation
+- assembled grounded context
+- no answer generation, reasoning, citation validation, or contradiction detection
 
 ### Phase 6 — Compiled Knowledge Wiki
 
 #### Phase 6A — Evidence-backed Wiki Export
 
 - Markdown knowledge notes
+- YAML frontmatter
 - claim-to-evidence mapping
 - proposal-first, non-destructive export
+- deterministic filename identity
+- strict proof-chain checks
 
 #### Phase 6B — Wiki Health / Lint / Drift Check
 
-- missing evidence checks
-- stale source hash detection
-- contradiction and orphan note detection
+- YAML frontmatter validation
+- `note_id` / `note_type` / `schema_version` / `status` checks
+- `source_policy` and `validation_status` checks
+- `evidence_count` consistency checks
+- claim citation resolution
+- evidence reference `document_id` / `chunk_id` checks
+- duplicate evidence label detection
+- duplicate `note_id` detection across directories
+- orphan / malformed note detection
+- source hash drift checks via explicit manifest
+- structured JSON health reports
+- fail-closed malformed note / manifest handling
 
 #### Phase 6C — Optional Obsidian Vault Adapter
 
-- Obsidian-compatible Markdown export
-- no Obsidian runtime dependency
+- Obsidian-compatible Markdown organization
+- no Obsidian runtime dependency in core TraceVault
 - TraceVault metadata preserved
+- wiki health checks should act as preflight validation before vault sync
+
+---
+
+## CLI Examples
+
+### Diagnose package health
+
+```bash
+python3 -m tracevault diagnose
+```
+
+### Ingest local source files
+
+```bash
+python3 -m tracevault ingest <path>
+python3 -m tracevault ingest <path> --json
+```
+
+### Validate exported wiki notes
+
+```bash
+python3 -m tracevault wiki-health <path>
+python3 -m tracevault wiki-health <path> --json
+python3 -m tracevault wiki-health <path> --strict
+python3 -m tracevault wiki-health <path> --source-manifest <manifest.json>
+```
+
+The wiki health checker validates frontmatter, evidence references, citation resolution, duplicate note identity, malformed notes, and source hash drift when an explicit manifest is provided.
+
+---
+
+## Implementation Status
+
+```text
+Phase 1   — Python Foundation                         complete
+Phase 2   — Ingestion + Differential Ingest            complete
+Phase 3A  — Semantic Refinement Foundation             complete
+Phase 3B  — Optional Local Model Refinement            complete
+Phase 4   — Hybrid Retrieval Foundation                complete
+Phase 4.1 — Retrieval Contract Hardening               complete
+Phase 5   — Evidence Pack & Grounded Context Assembly  complete
+Phase 6A  — Evidence-backed Wiki Export                complete
+Phase 6B  — Wiki Health / Lint / Drift Check           complete
+Phase 6C  — Optional Obsidian Vault Adapter            next
+```
 
 ---
 
@@ -168,10 +275,11 @@ This rule is central to enterprise use cases where reliability, governance, and 
 |---|---|---|
 | Source traceability | Partial | Full chunk-level traceability |
 | Raw vs cleaned context | Usually absent | Explicit dual-context model |
-| Exact-match retrieval | Weak | BM25 + vector hybrid retrieval |
+| Retrieval governance | Often opaque | Deterministic keyword baseline + labeled vector placeholder |
 | Evidence mapping | Weak | Required |
-| Validation layer | Rare | Built into roadmap |
-| Knowledge persistence | None | Evidence-backed wiki layer |
+| Evidence pack assembly | Often implicit | Explicit, inspectable, budget-aware |
+| Wiki artifact validation | Rare | Built-in wiki health / lint / drift check |
+| Knowledge persistence | Usually external | Evidence-backed wiki layer |
 | Audit readiness | Low | High |
 
 ---
@@ -190,7 +298,7 @@ TraceVault is:
 
 ```text
 Enterprise Knowledge Governance System
-Grounded AI Reasoning Platform
+Grounded AI Evidence Platform
 Hybrid Cloud + AI Architecture Portfolio Project
 ```
 
@@ -198,9 +306,20 @@ Hybrid Cloud + AI Architecture Portfolio Project
 
 ## Roadmap
 
+Near-term focus:
+
 ```text
-Phase 3B → Optional Local Model Refinement
-Phase 4  → Hybrid Retrieval
-Phase 5  → Grounded Reasoning + Validation
-Phase 6  → Evidence-backed Knowledge Wiki Layer
+Phase 6C → Optional Obsidian Vault Adapter
 ```
+
+Future extensions may include:
+
+```text
+real vector index lifecycle
+embedding integration with explicit provenance
+reasoning engine implementation
+validation / verification engine implementation
+portfolio-grade deployment packaging
+```
+
+These future extensions must preserve TraceVault's proof-chain model and source-of-truth hierarchy.
