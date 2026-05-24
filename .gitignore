@@ -61,3 +61,7 @@ plans/open-questions.md
 # Python packaging artifacts
 *.egg-info/
 .eggs/
+
+# Phase 6C — Obsidian vault adapter generated output (recursive)
+**/TraceVault/
+**/tracevault-vault-manifest.json

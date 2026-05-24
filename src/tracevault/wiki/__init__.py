@@ -54,4 +54,34 @@ __all__ = [
     "WikiHealthReport",
     "WikiLintIssue",
     "WikiParsedNote",
+    # Phase 6C — Vault adapter
+    "adapt_to_obsidian_vault",
+    "apply_vault_plan",
+    "build_vault_plan",
+    "VaultAdaptationPlan",
+    "VaultAdaptationResult",
+    "VaultAdapterConfig",
+    "VaultIndexPlan",
+    "VaultNotePlan",
 ]
+
+# Phase 6C — Vault adapter (lazy import to keep wiki package light)
+def __getattr__(name: str):
+    from tracevault.wiki.vault import (  # noqa: F401
+        VaultAdaptationPlan,
+        VaultAdaptationResult,
+        VaultAdapterConfig,
+        VaultIndexPlan,
+        VaultNotePlan,
+        adapt_to_obsidian_vault,
+        apply_vault_plan,
+        build_vault_plan,
+    )
+    try:
+        value = locals()[name]
+    except KeyError:
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r}"
+        ) from None
+    globals()[name] = value
+    return value
