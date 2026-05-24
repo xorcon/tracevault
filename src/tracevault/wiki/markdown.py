@@ -222,9 +222,11 @@ def _render_frontmatter(note: WikiNote, lines: list[str]) -> None:
                     lines.append(
                         f"    source_raw_hash: {yaml_scalar(sd.source_raw_hash)}"
                     )
-                if sd.content_hash:
+                # Always output content_hash (defaults to source_raw_hash)
+                content_hash_val = sd.content_hash or sd.source_raw_hash
+                if content_hash_val:
                     lines.append(
-                        f"    content_hash: {yaml_scalar(sd.content_hash)}"
+                        f"    content_hash: {yaml_scalar(content_hash_val)}"
                     )
 
         if meta.source_chunks:
