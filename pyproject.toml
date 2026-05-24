@@ -23,6 +23,9 @@ classifiers = [
     "Topic :: Text Processing :: Indexing",
 ]
 keywords = ["rag", "knowledge-governance", "hybrid-retrieval", "grounded-ai", "traceability"]
+dependencies = [
+    "PyYAML>=6.0",
+]
 
 [project.optional-dependencies]
 dev = [

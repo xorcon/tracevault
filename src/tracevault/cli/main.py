@@ -89,6 +89,37 @@ def create_parser() -> argparse.ArgumentParser:
         help="Output results as JSON",
     )
 
+    # Wiki-health command
+    wiki_health_parser = subparsers.add_parser(
+        "wiki-health",
+        help="Check wiki note health",
+        description=(
+            "Run deterministic health/lint checks on exported "
+            "wiki Markdown notes."
+        ),
+    )
+    wiki_health_parser.add_argument(
+        "path",
+        type=str,
+        help="Path to wiki note file or directory",
+    )
+    wiki_health_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+    wiki_health_parser.add_argument(
+        "--source-manifest",
+        type=str,
+        default=None,
+        help="Optional path to source manifest for drift detection",
+    )
+    wiki_health_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 1 on warnings as well as errors",
+    )
+
     return parser
 
 
@@ -212,6 +243,82 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_wiki_health(args: argparse.Namespace) -> int:
+    """Handle wiki-health command."""
+    from tracevault.wiki.health import check_wiki_health, print_health_report
+
+    path = Path(args.path)
+
+    if not path.exists():
+        output = {"error": f"Path not found: {args.path}", "passed": False}
+        print(json.dumps(output, indent=2) if args.json else f"Error: Path not found: {args.path}")
+        return 1
+
+    # Load optional source manifest for drift detection
+    source_hashes: dict[str, str] | None = None
+    manifest_issues: list = []
+    if args.source_manifest:
+        manifest_path = Path(args.source_manifest)
+        if not manifest_path.exists():
+            output = {"error": f"Source manifest not found: {args.source_manifest}", "passed": False}
+            print(json.dumps(output, indent=2) if args.json else (
+                f"Error: Source manifest not found: {args.source_manifest}"
+            ))
+            return 1
+        try:
+            raw = manifest_path.read_text(encoding="utf-8")
+            manifest_data = json.loads(raw)
+
+            # Support real TraceVault ingestion manifest schema (entries[])
+            entries = manifest_data.get("entries")
+            if isinstance(entries, list):
+                for entry in entries:
+                    spath = entry.get("source_path")
+                    chash = entry.get("content_hash")
+                    if spath and chash:
+                        source_hashes = source_hashes or {}
+                        source_hashes[spath] = chash
+            # Support simple document schema (documents[])
+            elif isinstance(manifest_data.get("documents"), list):
+                for entry in manifest_data.get("documents", []):
+                    did = entry.get("document_id")
+                    chash = entry.get("content_hash")
+                    if did and chash:
+                        source_hashes = source_hashes or {}
+                        source_hashes[did] = chash
+            else:
+                # Unrecognized shape — record as structured issue
+                from tracevault.wiki.report import IssueSeverity, WikiLintIssue
+                manifest_issues.append(WikiLintIssue(
+                    code="source_manifest_unrecognized",
+                    severity=IssueSeverity.ERROR,
+                    message=(
+                        "Source manifest has unrecognized schema "
+                        "(missing 'entries' or 'documents' list)"
+                    ),
+                    file_path=str(manifest_path),
+                ))
+                source_hashes = {}
+        except json.JSONDecodeError as exc:
+            output = {"error": f"Failed to parse source manifest: {exc}", "passed": False}
+            print(json.dumps(output, indent=2) if args.json else (
+                f"Error: Failed to parse source manifest: {exc}"
+            ))
+            return 1
+
+    report = check_wiki_health(path, source_hashes=source_hashes)
+    # Merge manifest-level issues into the report before printing
+    report.issues.extend(manifest_issues)
+    report.issues.sort(key=lambda i: (i.file_path, i.code, i.message))
+    exit_code = print_health_report(report, as_json=args.json)
+
+    # In strict mode, warnings also trigger exit 1
+    if args.strict and exit_code == 0 and report.warning_count > 0:
+        exit_code = 1
+
+    return exit_code
+
+
 def main() -> int:
     """Main entry point."""
     parser = create_parser()
@@ -227,6 +334,8 @@ def main() -> int:
         return cmd_diagnose(args)
     elif args.command == "ingest":
         return cmd_ingest(args)
+    elif args.command == "wiki-health":
+        return cmd_wiki_health(args)
     else:
         parser.print_help()
         return 1
