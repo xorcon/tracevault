@@ -265,13 +265,15 @@ def _extract_evidence_labels(body: str) -> list[str]:
     return labels
 
 
-def _extract_claim_citations(body: str) -> dict[str, list[str]]:
-    """Extract claim-to-citation mapping from the Claims section.
+def _extract_claim_citations(body: str) -> list[tuple[str, list[str]]]:
+    """Extract claim-to-citation pairs from the Claims section.
 
     Returns:
-        Dict mapping claim statement text to list of citation labels.
+        Ordered list of (claim_text, [citation_labels]) pairs, one per
+        claim line.  Duplicate claim text produces separate entries so
+        all citation labels are preserved.
     """
-    citations: dict[str, list[str]] = {}
+    citations: list[tuple[str, list[str]]] = []
     in_claims = False
 
     for line in body.split("\n"):
@@ -286,6 +288,6 @@ def _extract_claim_citations(body: str) -> dict[str, list[str]]:
             if match:
                 statement = match.group(1)
                 labels = [token.strip() for token in match.group(2).split(",")]
-                citations[statement] = labels
+                citations.append((statement, labels))
 
     return citations

@@ -381,3 +381,111 @@ class TestCLIUnrecognizedManifestJSON:
         re_round = json.dumps(parsed, indent=2)
         reparsed = json.loads(re_round)
         assert reparsed == parsed
+
+
+class TestCLIMalformedManifestShape:
+    """Regression: malformed valid-JSON manifest must fail closed as source_manifest_unrecognized."""
+
+    def _write_note(self, tmp_path: Path) -> Path:
+        note = tmp_path / "note.md"
+        note.write_text(_valid_note())
+        return note
+
+    def test_top_level_list_json(self, tmp_path: Path):
+        """Manifest with top-level [] and --json: exactly one valid JSON document."""
+        self._write_note(tmp_path)
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps([]))
+        result = _run_cli(str(tmp_path), "--source-manifest", str(manifest), "--json")
+        # Must parse without error (exactly one top-level JSON object)
+        data = json.loads(result.stdout)
+        assert isinstance(data, dict)
+        assert any(
+            i["code"] == "source_manifest_unrecognized"
+            for i in data.get("issues", [])
+        )
+        assert result.returncode == 1
+
+    def test_top_level_list_no_traceback(self, tmp_path: Path):
+        """Manifest with top-level [] should not traceback."""
+        self._write_note(tmp_path)
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps([]))
+        result = _run_cli(str(tmp_path), "--source-manifest", str(manifest))
+        assert "Traceback" not in result.stderr
+        assert "Traceback" not in result.stdout
+        assert result.returncode == 1
+
+    def test_entries_non_dict_items(self, tmp_path: Path):
+        """Manifest with {"entries": ["bad"]} should emit source_manifest_unrecognized."""
+        self._write_note(tmp_path)
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"entries": ["bad"]}))
+        result = _run_cli(str(tmp_path), "--source-manifest", str(manifest), "--json")
+        data = json.loads(result.stdout)
+        assert any(
+            i["code"] == "source_manifest_unrecognized"
+            for i in data.get("issues", [])
+        )
+        assert result.returncode == 1
+        assert "Traceback" not in result.stderr
+
+    def test_documents_non_dict_items(self, tmp_path: Path):
+        """Manifest with {"documents": [123]} should emit source_manifest_unrecognized."""
+        self._write_note(tmp_path)
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"documents": [123]}))
+        result = _run_cli(str(tmp_path), "--source-manifest", str(manifest), "--json")
+        data = json.loads(result.stdout)
+        assert any(
+            i["code"] == "source_manifest_unrecognized"
+            for i in data.get("issues", [])
+        )
+        assert result.returncode == 1
+        assert "Traceback" not in result.stderr
+
+    def test_entries_not_a_list(self, tmp_path: Path):
+        """Manifest with {"entries": "string"} should emit source_manifest_unrecognized."""
+        self._write_note(tmp_path)
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"entries": "string"}))
+        result = _run_cli(str(tmp_path), "--source-manifest", str(manifest), "--json")
+        data = json.loads(result.stdout)
+        assert any(
+            i["code"] == "source_manifest_unrecognized"
+            for i in data.get("issues", [])
+        )
+        assert result.returncode == 1
+
+    def test_documents_not_a_list(self, tmp_path: Path):
+        """Manifest with {"documents": {}} should emit source_manifest_unrecognized."""
+        self._write_note(tmp_path)
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"documents": {}}))
+        result = _run_cli(str(tmp_path), "--source-manifest", str(manifest), "--json")
+        data = json.loads(result.stdout)
+        assert any(
+            i["code"] == "source_manifest_unrecognized"
+            for i in data.get("issues", [])
+        )
+        assert result.returncode == 1
+
+    def test_valid_entries_still_works(self, tmp_path: Path):
+        """Valid entries[] manifest should not produce error."""
+        self._write_note(tmp_path)
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({
+            "version": "1.0",
+            "entries": [
+                {
+                    "source_path": "docs/test.md",
+                    "content_hash": "abc123",
+                    "size_bytes": 100,
+                    "modified_time": "2026-01-01T00:00:00",
+                    "last_ingested": "2026-01-01T00:00:00",
+                },
+            ],
+        }))
+        result = _run_cli(str(tmp_path), "--source-manifest", str(manifest))
+        assert result.returncode == 0
+        assert "source_manifest_unrecognized" not in result.stdout

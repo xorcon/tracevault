@@ -58,7 +58,7 @@ class TestWikiParsedNote:
         assert note.raw_frontmatter == ""
         assert note.body == ""
         assert note.evidence_labels == []
-        assert note.claim_citations == {}
+        assert note.claim_citations == []
 
     def test_full(self):
         note = WikiParsedNote(
@@ -67,11 +67,11 @@ class TestWikiParsedNote:
             raw_frontmatter="note_id: n1",
             body="# Title",
             evidence_labels=["E1"],
-            claim_citations={"A fact": ["E1"]},
+            claim_citations=[("A fact", ["E1"])],
         )
         assert note.frontmatter["note_id"] == "n1"
         assert note.evidence_labels == ["E1"]
-        assert note.claim_citations["A fact"] == ["E1"]
+        assert note.claim_citations[0] == ("A fact", ["E1"])
 
 
 class TestWikiHealthReport:

@@ -632,3 +632,122 @@ class TestSourcePathBasedDriftCheck:
         issues = lint_note(parsed, source_hashes={"doc_001": "abc123"})
         # source_path "docs/test.md" is not in expected hashes
         assert any(i.code == "source_hash_missing_expected" for i in issues)
+
+
+class TestDuplicateClaimCitationLint:
+    """Regression: lint must validate all citations from all repeated claim lines."""
+
+    def test_duplicate_claim_earlier_unresolved_emits_error(self, tmp_path: Path):
+        """Same claim text with earlier unresolved citation must produce citation_unresolved."""
+        content = textwrap.dedent('''\
+            ---
+            note_id: "note_001"
+            note_type: "compiled_knowledge_wiki_note"
+            status: "proposal"
+            generated_at: "2026-01-01T00:00:00+00:00"
+            generated_by: "tracevault"
+            generator_version: "0.1.0"
+            schema_version: "wiki-export-v1"
+            source_policy: "raw_text_authoritative"
+            validation_status: "validated"
+            evidence_count: 1
+            ---
+
+            # Test Note
+
+            ## Claims
+
+            - Same claim [E_BAD]
+            - Same claim [E1]
+
+            ## Evidence References
+
+            ### E1
+
+            - **Document**: `doc_001`
+            - **Chunk**: `chunk_001`
+
+            ## TraceVault Metadata
+
+            - note_id: `note_001`
+        ''')
+        issues = _lint(content, tmp_path)
+        unresolved = [i for i in issues if i.code == "citation_unresolved"]
+        assert len(unresolved) == 1
+        assert "E_BAD" in unresolved[0].message
+
+    def test_duplicate_claim_both_valid_passes(self, tmp_path: Path):
+        """Same claim text with both valid citations should not produce unresolved errors."""
+        content = textwrap.dedent('''\
+            ---
+            note_id: "note_001"
+            note_type: "compiled_knowledge_wiki_note"
+            status: "proposal"
+            generated_at: "2026-01-01T00:00:00+00:00"
+            generated_by: "tracevault"
+            generator_version: "0.1.0"
+            schema_version: "wiki-export-v1"
+            source_policy: "raw_text_authoritative"
+            validation_status: "validated"
+            evidence_count: 2
+            ---
+
+            # Test Note
+
+            ## Claims
+
+            - Same claim [E1]
+            - Same claim [E2]
+
+            ## Evidence References
+
+            ### E1
+
+            - **Document**: `doc_001`
+            - **Chunk**: `chunk_001`
+
+            ### E2
+
+            - **Document**: `doc_002`
+            - **Chunk**: `chunk_002`
+
+            ## TraceVault Metadata
+
+            - note_id: `note_001`
+        ''')
+        issues = _lint(content, tmp_path)
+        assert not any(i.code == "citation_unresolved" for i in issues)
+        assert not any(i.code == "duplicate_claim" for i in issues)
+
+    def test_duplicate_claim_both_unresolved_emits_two_errors(self, tmp_path: Path):
+        """Same claim text with both unresolved citations must produce two errors."""
+        content = textwrap.dedent('''\
+            ---
+            note_id: "note_001"
+            note_type: "compiled_knowledge_wiki_note"
+            status: "proposal"
+            generated_at: "2026-01-01T00:00:00+00:00"
+            generated_by: "tracevault"
+            generator_version: "0.1.0"
+            schema_version: "wiki-export-v1"
+            source_policy: "raw_text_authoritative"
+            validation_status: "validated"
+            evidence_count: 0
+            ---
+
+            # Test Note
+
+            ## Claims
+
+            - Same claim [E_BAD1]
+            - Same claim [E_BAD2]
+
+            ## Evidence References
+
+            ## TraceVault Metadata
+
+            - note_id: `note_001`
+        ''')
+        issues = _lint(content, tmp_path)
+        unresolved = [i for i in issues if i.code == "citation_unresolved"]
+        assert len(unresolved) == 2

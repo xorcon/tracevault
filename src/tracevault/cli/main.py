@@ -16,6 +16,107 @@ from tracevault.ingestion import DEFAULT_MANIFEST_PATH, ingest_path
 from tracevault.ingestion.manifest import ManifestCorruptionError
 
 
+def _load_source_manifest_hashes(
+    manifest_path: Path,
+) -> tuple[dict[str, str], list]:
+    """Load source hash map from a manifest file with structural guard-rails.
+
+    Validates that the manifest JSON is a dict and that entries/documents
+    are lists of dicts before calling .get() on items.
+
+    Returns:
+        (expected_hashes, manifest_issues) -- if the schema is invalid,
+        expected_hashes is empty and manifest_issues contains a
+        source_manifest_unrecognized error.
+    """
+    from tracevault.wiki.report import IssueSeverity, WikiLintIssue
+
+    raw = manifest_path.read_text(encoding="utf-8")
+    data = json.loads(raw)
+
+    if not isinstance(data, dict):
+        return {}, [WikiLintIssue(
+            code="source_manifest_unrecognized",
+            severity=IssueSeverity.ERROR,
+            message=(
+                "Source manifest has unrecognized schema "
+                "(top-level value is not an object)"
+            ),
+            file_path=str(manifest_path),
+        )]
+
+    hashes: dict[str, str] = {}
+
+    # Try "entries" first (real TraceVault ingestion manifest schema)
+    entries = data.get("entries")
+    if entries is not None:
+        if not isinstance(entries, list):
+            return {}, [WikiLintIssue(
+                code="source_manifest_unrecognized",
+                severity=IssueSeverity.ERROR,
+                message=(
+                    "Source manifest has unrecognized schema "
+                    "('entries' is not a list)"
+                ),
+                file_path=str(manifest_path),
+            )]
+        for item in entries:
+            if not isinstance(item, dict):
+                return {}, [WikiLintIssue(
+                    code="source_manifest_unrecognized",
+                    severity=IssueSeverity.ERROR,
+                    message=(
+                        "Source manifest has unrecognized schema "
+                        "('entries' contains non-object items)"
+                    ),
+                    file_path=str(manifest_path),
+                )]
+            spath = item.get("source_path")
+            chash = item.get("content_hash")
+            if spath and chash:
+                hashes[spath] = chash
+    # Fallback to "documents" schema
+    elif "documents" in data:
+        documents = data["documents"]
+        if not isinstance(documents, list):
+            return {}, [WikiLintIssue(
+                code="source_manifest_unrecognized",
+                severity=IssueSeverity.ERROR,
+                message=(
+                    "Source manifest has unrecognized schema "
+                    "('documents' is not a list)"
+                ),
+                file_path=str(manifest_path),
+            )]
+        for item in documents:
+            if not isinstance(item, dict):
+                return {}, [WikiLintIssue(
+                    code="source_manifest_unrecognized",
+                    severity=IssueSeverity.ERROR,
+                    message=(
+                        "Source manifest has unrecognized schema "
+                        "('documents' contains non-object items)"
+                    ),
+                    file_path=str(manifest_path),
+                )]
+            did = item.get("document_id")
+            chash = item.get("content_hash")
+            if did and chash:
+                hashes[did] = chash
+    else:
+        return {}, [WikiLintIssue(
+            code="source_manifest_unrecognized",
+            severity=IssueSeverity.ERROR,
+            message=(
+                "Source manifest has unrecognized schema "
+                "(missing 'entries' or 'documents' list)"
+            ),
+            file_path=str(manifest_path),
+        )]
+
+    return hashes, []
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for the CLI."""
     parser = argparse.ArgumentParser(
@@ -266,39 +367,7 @@ def cmd_wiki_health(args: argparse.Namespace) -> int:
             ))
             return 1
         try:
-            raw = manifest_path.read_text(encoding="utf-8")
-            manifest_data = json.loads(raw)
-
-            # Support real TraceVault ingestion manifest schema (entries[])
-            entries = manifest_data.get("entries")
-            if isinstance(entries, list):
-                for entry in entries:
-                    spath = entry.get("source_path")
-                    chash = entry.get("content_hash")
-                    if spath and chash:
-                        source_hashes = source_hashes or {}
-                        source_hashes[spath] = chash
-            # Support simple document schema (documents[])
-            elif isinstance(manifest_data.get("documents"), list):
-                for entry in manifest_data.get("documents", []):
-                    did = entry.get("document_id")
-                    chash = entry.get("content_hash")
-                    if did and chash:
-                        source_hashes = source_hashes or {}
-                        source_hashes[did] = chash
-            else:
-                # Unrecognized shape — record as structured issue
-                from tracevault.wiki.report import IssueSeverity, WikiLintIssue
-                manifest_issues.append(WikiLintIssue(
-                    code="source_manifest_unrecognized",
-                    severity=IssueSeverity.ERROR,
-                    message=(
-                        "Source manifest has unrecognized schema "
-                        "(missing 'entries' or 'documents' list)"
-                    ),
-                    file_path=str(manifest_path),
-                ))
-                source_hashes = {}
+            source_hashes, manifest_issues = _load_source_manifest_hashes(manifest_path)
         except json.JSONDecodeError as exc:
             output = {"error": f"Failed to parse source manifest: {exc}", "passed": False}
             print(json.dumps(output, indent=2) if args.json else (

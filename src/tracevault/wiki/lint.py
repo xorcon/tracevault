@@ -269,7 +269,7 @@ def _check_claims_have_citations(note: WikiParsedNote, issues: list[WikiLintIssu
 def _check_citations_resolve(note: WikiParsedNote, issues: list[WikiLintIssue]) -> None:
     """Every citation label in claims must resolve to an evidence heading."""
     evidence_set = set(note.evidence_labels)
-    for _statement, citations in note.claim_citations.items():
+    for _statement, citations in note.claim_citations:
         for cit in citations:
             if cit not in evidence_set:
                 issues.append(WikiLintIssue(

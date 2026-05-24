@@ -70,7 +70,9 @@ class WikiParsedNote:
         raw_frontmatter: Raw frontmatter string before YAML parsing.
         body: Markdown body after the closing frontmatter delimiter.
         evidence_labels: Evidence section headings extracted from the body.
-        claim_citations: Citations found in claim lines, keyed by claim text.
+        claim_citations: Ordered list of (claim_text, [citation_labels])
+            pairs, one per claim line.  Duplicate claim text produces
+            separate entries so all citations are preserved.
     """
 
     file_path: str
@@ -78,7 +80,7 @@ class WikiParsedNote:
     raw_frontmatter: str = ""
     body: str = ""
     evidence_labels: list[str] = field(default_factory=list)
-    claim_citations: dict[str, list[str]] = field(default_factory=dict)
+    claim_citations: list[tuple[str, list[str]]] = field(default_factory=list)
     yaml_parse_error: bool = False
 
 
