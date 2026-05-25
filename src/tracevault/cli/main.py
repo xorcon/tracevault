@@ -221,6 +221,82 @@ def create_parser() -> argparse.ArgumentParser:
         help="Exit 1 on warnings as well as errors",
     )
 
+    # Wiki-vault-plan command
+    wiki_vault_plan_parser = subparsers.add_parser(
+        "wiki-vault-plan",
+        help="Preview Obsidian vault adaptation plan",
+        description=(
+            "Build and display an Obsidian vault adaptation plan "
+            "without writing any files."
+        ),
+    )
+    wiki_vault_plan_parser.add_argument(
+        "wiki_dir",
+        type=str,
+        help="Path to exported wiki directory",
+    )
+    wiki_vault_plan_parser.add_argument(
+        "--vault-dir",
+        type=str,
+        default=None,
+        help="Target vault directory (default: <wiki_dir>/vault)",
+    )
+    wiki_vault_plan_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output plan as JSON",
+    )
+    wiki_vault_plan_parser.add_argument(
+        "--allow-unhealthy",
+        action="store_true",
+        help="Bypass Phase 6B health preflight gate",
+    )
+    wiki_vault_plan_parser.add_argument(
+        "--no-index",
+        action="store_true",
+        help="Skip index note generation",
+    )
+
+    # Wiki-vault-adapt command
+    wiki_vault_adapt_parser = subparsers.add_parser(
+        "wiki-vault-adapt",
+        help="Adapt wiki notes to Obsidian vault structure",
+        description=(
+            "Copy Phase 6A wiki notes into an Obsidian-friendly "
+            "vault layout with index notes and manifest."
+        ),
+    )
+    wiki_vault_adapt_parser.add_argument(
+        "wiki_dir",
+        type=str,
+        help="Path to exported wiki directory",
+    )
+    wiki_vault_adapt_parser.add_argument(
+        "vault_dir",
+        type=str,
+        help="Target vault directory",
+    )
+    wiki_vault_adapt_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output result as JSON",
+    )
+    wiki_vault_adapt_parser.add_argument(
+        "--allow-overwrite",
+        action="store_true",
+        help="Overwrite existing destination files",
+    )
+    wiki_vault_adapt_parser.add_argument(
+        "--allow-unhealthy",
+        action="store_true",
+        help="Bypass Phase 6B health preflight gate",
+    )
+    wiki_vault_adapt_parser.add_argument(
+        "--no-index",
+        action="store_true",
+        help="Skip index note generation",
+    )
+
     return parser
 
 
@@ -388,6 +464,142 @@ def cmd_wiki_health(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def cmd_wiki_vault_plan(args: argparse.Namespace) -> int:
+    """Handle wiki-vault-plan command."""
+    from tracevault.wiki.vault.adapter import build_vault_plan
+    from tracevault.wiki.vault.models import VaultAdapterConfig
+
+    wiki_dir = Path(args.wiki_dir)
+
+    if not wiki_dir.exists():
+        output = {"error": f"Wiki directory not found: {args.wiki_dir}"}
+        print(
+            json.dumps(output, indent=2)
+            if args.json
+            else f"Error: Wiki directory not found: {args.wiki_dir}"
+        )
+        return 1
+
+    vault_dir = Path(args.vault_dir) if args.vault_dir else wiki_dir / "vault"
+
+    config = VaultAdapterConfig(
+        allow_overwrite=False,
+        allow_unhealthy=getattr(args, "allow_unhealthy", False),
+        generate_index=not getattr(args, "no_index", False),
+    )
+
+    try:
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+    except ValueError as exc:
+        output = {"error": str(exc)}
+        print(
+            json.dumps(output, indent=2)
+            if args.json
+            else f"Error: {exc}"
+        )
+        return 1
+
+    if args.json:
+        print(json.dumps(plan.to_dict(), indent=2))
+    else:
+        print("Vault Adaptation Plan")
+        print(f"  Wiki dir: {plan.wiki_dir}")
+        print(f"  Vault dir: {plan.vault_dir}")
+        print(
+            f"  Health: {'PASSED' if plan.health_passed else 'FAILED'} "
+            f"({plan.health_errors} errors, {plan.health_warnings} warnings)"
+        )
+        print(f"  Total notes: {plan.total_notes}")
+        print(f"  Accepted: {len(plan.accepted_notes)}")
+        print(f"  Rejected: {len(plan.rejected_notes)}")
+        print(f"  Skipped: {len(plan.skipped_notes)}")
+        print(f"  Index notes: {len(plan.index_notes)}")
+        print(f"  Manifest: {plan.manifest_relative}")
+
+        for note in plan.notes:
+            if note.collision:
+                print(f"  COLLISION: {note.relative_source} — {note.rejection_reason}")
+            elif note.rejected:
+                print(f"  REJECTED: {note.relative_source} — {note.rejection_reason}")
+            elif note.skipped:
+                print(f"  SKIPPED: {note.relative_source}")
+            else:
+                print(f"  {note.relative_source} -> {note.relative_destination}")
+
+    # Exit non-zero if health preflight failed
+    if not plan.health_passed:
+        return 1
+    # Exit non-zero if any notes were rejected (including collisions)
+    if plan.rejected_notes:
+        return 1
+    # Exit non-zero if any destination collisions detected
+    if plan.collision_notes:
+        return 1
+    return 0
+
+
+def cmd_wiki_vault_adapt(args: argparse.Namespace) -> int:
+    """Handle wiki-vault-adapt command."""
+    from tracevault.wiki.vault.adapter import adapt_to_obsidian_vault
+    from tracevault.wiki.vault.models import VaultAdapterConfig
+
+    wiki_dir = Path(args.wiki_dir)
+    vault_dir = Path(args.vault_dir)
+
+    if not wiki_dir.exists():
+        output = {"error": f"Wiki directory not found: {args.wiki_dir}"}
+        print(
+            json.dumps(output, indent=2)
+            if args.json
+            else f"Error: Wiki directory not found: {args.wiki_dir}"
+        )
+        return 1
+
+    config = VaultAdapterConfig(
+        allow_overwrite=getattr(args, "allow_overwrite", False),
+        allow_unhealthy=getattr(args, "allow_unhealthy", False),
+        generate_index=not getattr(args, "no_index", False),
+    )
+
+    try:
+        result = adapt_to_obsidian_vault(
+            wiki_dir, vault_dir, config=config
+        )
+    except ValueError as exc:
+        output = {"error": str(exc)}
+        print(
+            json.dumps(output, indent=2)
+            if args.json
+            else f"Error: {exc}"
+        )
+        return 1
+
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+    else:
+        print("Vault Adaptation Result")
+        print(f"  Wiki dir: {result.plan.wiki_dir}")
+        print(f"  Vault dir: {result.plan.vault_dir}")
+        print(f"  Notes copied: {result.notes_copied}")
+        print(f"  Notes skipped: {result.notes_skipped}")
+        print(f"  Notes rejected: {result.notes_rejected}")
+        print(f"  Index notes written: {result.index_notes_written}")
+        print(f"  Manifest written: {result.manifest_written}")
+        if result.errors:
+            print("  Errors:")
+            for err in result.errors:
+                print(f"    - {err}")
+
+    # Exit non-zero on health failure, rejected notes, or errors
+    if not result.plan.health_passed:
+        return 1
+    if result.notes_rejected > 0:
+        return 1
+    if result.errors:
+        return 1
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     parser = create_parser()
@@ -405,6 +617,10 @@ def main() -> int:
         return cmd_ingest(args)
     elif args.command == "wiki-health":
         return cmd_wiki_health(args)
+    elif args.command == "wiki-vault-plan":
+        return cmd_wiki_vault_plan(args)
+    elif args.command == "wiki-vault-adapt":
+        return cmd_wiki_vault_adapt(args)
     else:
         parser.print_help()
         return 1
