@@ -32,20 +32,55 @@ from tracevault.wiki.vault.models import (
 )
 
 
-def _collect_wiki_md_files(wiki_dir: Path) -> list[Path]:
+def _collect_wiki_md_files(
+    wiki_dir: Path,
+    exclude_dirs: list[Path] | None = None,
+) -> list[Path]:
     """Collect .md files recursively, sorted for determinism.
 
-    Skips hidden directories (starting with . or _).
+    Skips hidden directories (starting with . or _) and any directory
+    named TraceVault (generated vault output).
+
+    Also skips any path that falls under a resolved exclude directory
+    (e.g., vault_dir when it is nested inside wiki_dir).
     """
+    exclude_dirs = exclude_dirs or []
     files: list[Path] = []
     for child in sorted(wiki_dir.iterdir()):
         if child.is_dir():
             if child.name.startswith((".", "_")):
                 continue
-            files.extend(_collect_wiki_md_files(child))
+            # Skip generated TraceVault output directories
+            if child.name == "TraceVault":
+                continue
+            # Skip any candidate under an excluded directory
+            try:
+                resolved = child.resolve(strict=False)
+                if any(resolved.is_relative_to(ed) for ed in exclude_dirs):
+                    continue
+            except (OSError, ValueError):
+                pass
+            files.extend(_collect_wiki_md_files(child, exclude_dirs))
         elif child.suffix.lower() == ".md":
+            # Skip files under excluded directories
+            try:
+                resolved = child.resolve(strict=False)
+                if any(resolved.is_relative_to(ed) for ed in exclude_dirs):
+                    continue
+            except (OSError, ValueError):
+                pass
             files.append(child)
     return files
+
+
+def canonical_destination_key(path: Path) -> str:
+    """Compute a collision-safe destination key.
+
+    Uses the resolved absolute path lowercased so that case-only
+    filename collisions (e.g. A.md vs a.md) are detected on
+    case-insensitive filesystems.
+    """
+    return str(path.resolve()).casefold()
 
 
 def _parse_source_document_ids(parsed) -> list[str]:
@@ -121,8 +156,8 @@ def build_vault_plan(
     Raises:
         ValueError: If wiki_dir does not exist.
     """
-    wiki_dir = Path(wiki_dir)
-    vault_dir = Path(vault_dir)
+    wiki_dir = Path(wiki_dir).resolve()
+    vault_dir = Path(vault_dir).resolve()
     config = config or VaultAdapterConfig()
 
     if not wiki_dir.exists():
@@ -136,14 +171,14 @@ def build_vault_plan(
 
     # --- Health preflight ---
     if not config.allow_unhealthy:
-        report = check_wiki_health(wiki_dir)
+        report = check_wiki_health(wiki_dir, exclude_dirs=[vault_dir])
         plan.health_errors = report.error_count
         plan.health_warnings = report.warning_count
         plan.health_passed = report.passed
 
         if not plan.health_passed:
             # Reject all notes with health error context
-            md_files = _collect_wiki_md_files(wiki_dir)
+            md_files = _collect_wiki_md_files(wiki_dir, exclude_dirs=[vault_dir])
             for fp in md_files:
                 note_plan = VaultNotePlan(
                     source_path=str(fp),
@@ -172,7 +207,7 @@ def build_vault_plan(
             return plan
 
     # --- Parse and plan each note ---
-    md_files = _collect_wiki_md_files(wiki_dir)
+    md_files = _collect_wiki_md_files(wiki_dir, exclude_dirs=[vault_dir])
 
     for fp in md_files:
         dest = resolve_note_destination(vault_dir, fp.name)
@@ -221,21 +256,21 @@ def build_vault_plan(
 
         plan.notes.append(note_plan)
 
-    # --- Intra-plan collision detection ---
+    # --- Intra-plan collision detection (case-insensitive) ---
     seen_dest: dict[str, str] = {}
     for note_plan in plan.notes:
         if note_plan.rejected:
             continue
-        dest = note_plan.destination_path
-        if dest in seen_dest:
+        dest_key = canonical_destination_key(Path(note_plan.destination_path))
+        if dest_key in seen_dest:
             note_plan.rejected = True
             note_plan.rejection_reason = (
-                f"Duplicate destination '{dest}' (first claimed by "
-                f"'{seen_dest[dest]}')"
+                f"Duplicate destination '{note_plan.destination_path}' "
+                f"(first claimed by '{seen_dest[dest_key]}')"
             )
             note_plan.collision = True
         else:
-            seen_dest[dest] = note_plan.relative_source
+            seen_dest[dest_key] = note_plan.relative_source
 
     # --- Pre-write source/destination validation ---
     for note_plan in plan.notes:
@@ -310,19 +345,19 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
         )
         return result
 
-    # (c) Validate no duplicate destination paths (defensive)
+    # (c) Validate no duplicate destination paths (defensive, case-insensitive)
     dest_check: dict[str, str] = {}
     for note_plan in plan.notes:
         if note_plan.rejected or note_plan.skipped:
             continue
-        d = note_plan.destination_path
-        if d in dest_check:
+        dest_key = canonical_destination_key(Path(note_plan.destination_path))
+        if dest_key in dest_check:
             result.errors.append(
-                f"Duplicate destination '{d}' (claimed by "
-                f"'{dest_check[d]}' and '{note_plan.relative_source}')"
+                f"Duplicate destination '{note_plan.destination_path}' (claimed by "
+                f"'{dest_check[dest_key]}' and '{note_plan.relative_source}')"
             )
             return result
-        dest_check[d] = note_plan.relative_source
+        dest_check[dest_key] = note_plan.relative_source
 
     # (d) Validate source files are readable
     for note_plan in plan.notes:

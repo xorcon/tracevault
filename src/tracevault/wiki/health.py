@@ -22,6 +22,7 @@ def check_wiki_health(
     path: Path | str,
     *,
     source_hashes: dict[str, str] | None = None,
+    exclude_dirs: list[Path] | None = None,
 ) -> WikiHealthReport:
     """Run a full health check on a directory of wiki notes or a single file.
 
@@ -29,6 +30,9 @@ def check_wiki_health(
         path: Directory containing exported Markdown notes, or a single .md file.
         source_hashes: Optional mapping of document_id -> expected source
             hash for drift detection.
+        exclude_dirs: Optional list of resolved directory paths to skip
+            during directory scans.  Used to exclude generated vault
+            output when vault_dir is nested inside the wiki directory.
 
     Returns:
         WikiHealthReport with all issues sorted deterministically
@@ -37,17 +41,39 @@ def check_wiki_health(
     root = Path(path)
 
     if root.is_file():
-        return _check_single_file(root, source_hashes=source_hashes)
+        return _check_single_file(
+            root, source_hashes=source_hashes, exclude_dirs=exclude_dirs
+        )
 
-    return _check_directory(root, source_hashes=source_hashes)
+    return _check_directory(root, source_hashes=source_hashes, exclude_dirs=exclude_dirs)
 
 
 def _check_single_file(
     file_path: Path,
     *,
     source_hashes: dict[str, str] | None = None,
+    exclude_dirs: list[Path] | None = None,
 ) -> WikiHealthReport:
-    """Run lint checks on a single Markdown file."""
+    """Run lint checks on a single Markdown file.
+
+    If the file falls under an excluded directory, return an empty
+    report so the caller can skip it cleanly.
+    """
+    exclude_dirs = exclude_dirs or []
+
+    # Skip file if it falls under an excluded directory
+    try:
+        resolved = file_path.resolve(strict=False)
+        if any(resolved.is_relative_to(ed) for ed in exclude_dirs):
+            return WikiHealthReport(
+                path=str(file_path),
+                files_scanned=0,
+                issues=[],
+                parsed_notes=[],
+            )
+    except (OSError, ValueError):
+        pass
+
     issues: list[WikiLintIssue] = []
 
     if file_path.suffix.lower() != ".md":
@@ -79,9 +105,10 @@ def _check_directory(
     root: Path,
     *,
     source_hashes: dict[str, str] | None = None,
+    exclude_dirs: list[Path] | None = None,
 ) -> WikiHealthReport:
     """Run a full health check on a directory of wiki notes."""
-    md_files = _collect_md_files(root)
+    md_files = _collect_md_files(root, exclude_dirs=exclude_dirs)
     issues: list[WikiLintIssue] = []
     parsed_notes: list[WikiParsedNote] = []
     seen_note_ids: dict[str, str] = {}
@@ -141,18 +168,40 @@ def _check_directory(
     )
 
 
-def _collect_md_files(root: Path) -> list[Path]:
+def _collect_md_files(
+    root: Path,
+    exclude_dirs: list[Path] | None = None,
+) -> list[Path]:
     """Collect .md files recursively, sorted for determinism.
 
-    Skips hidden directories (starting with . or _).
+    Skips hidden directories (starting with . or _) and any path
+    under an excluded directory (e.g., generated vault output).
     """
+    exclude_dirs = exclude_dirs or []
     files: list[Path] = []
     for child in sorted(root.iterdir()):
         if child.is_dir():
             if child.name.startswith((".", "_")):
                 continue
-            files.extend(_collect_md_files(child))
+            # Skip generated TraceVault output directories
+            if child.name == "TraceVault":
+                continue
+            # Skip directories under excluded paths
+            try:
+                resolved = child.resolve(strict=False)
+                if any(resolved.is_relative_to(ed) for ed in exclude_dirs):
+                    continue
+            except (OSError, ValueError):
+                pass
+            files.extend(_collect_md_files(child, exclude_dirs=exclude_dirs))
         elif child.suffix.lower() == ".md":
+            # Skip files under excluded directories
+            try:
+                resolved = child.resolve(strict=False)
+                if any(resolved.is_relative_to(ed) for ed in exclude_dirs):
+                    continue
+            except (OSError, ValueError):
+                pass
             files.append(child)
     return files
 

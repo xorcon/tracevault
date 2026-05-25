@@ -222,3 +222,102 @@ class TestNonexistentPath:
         bad_path = tmp_path / "nonexistent"
         with pytest.raises(FileNotFoundError):
             check_wiki_health(bad_path)
+
+
+class TestExcludeDirs:
+    """exclude_dirs parameter must skip generated vault output."""
+
+    def test_exclude_dir_skips_nested_directory(self, tmp_path: Path):
+        (tmp_path / "good.md").write_text(_valid_note(note_id="good"))
+        bad_dir = tmp_path / "bad"
+        bad_dir.mkdir()
+        (bad_dir / "bad.md").write_text("# No frontmatter")
+
+        report = check_wiki_health(tmp_path, exclude_dirs=[bad_dir.resolve()])
+        assert report.files_scanned == 1
+        assert report.passed is True
+
+    def test_without_exclude_dir_bad_file_detected(self, tmp_path: Path):
+        (tmp_path / "good.md").write_text(_valid_note(note_id="good"))
+        bad_dir = tmp_path / "bad"
+        bad_dir.mkdir()
+        (bad_dir / "bad.md").write_text("# No frontmatter")
+
+        report = check_wiki_health(tmp_path)
+        assert report.files_scanned == 2
+        assert report.passed is False
+
+    def test_exclude_dirs_deep_nesting(self, tmp_path: Path):
+        (tmp_path / "top.md").write_text(_valid_note(note_id="top"))
+        deep = tmp_path / "a" / "b" / "c"
+        deep.mkdir(parents=True)
+        (deep / "bad.md").write_text("# No frontmatter")
+
+        exclude = tmp_path / "a"
+        report = check_wiki_health(tmp_path, exclude_dirs=[exclude.resolve()])
+        assert report.files_scanned == 1
+        assert report.passed is True
+
+    def test_tracevault_dir_skipped(self, tmp_path: Path):
+        (tmp_path / "good.md").write_text(_valid_note(note_id="good"))
+        tv = tmp_path / "TraceVault" / "Notes"
+        tv.mkdir(parents=True)
+        (tv / "generated.md").write_text("# Generated vault output")
+
+        report = check_wiki_health(tmp_path)
+        assert report.files_scanned == 1
+        assert report.passed is True
+
+    def test_tracevault_dir_at_nested_level_skipped(self, tmp_path: Path):
+        (tmp_path / "sub" / "good.md").parent.mkdir()
+        (tmp_path / "sub" / "good.md").write_text(_valid_note(note_id="good"))
+        (tmp_path / "sub" / "TraceVault" / "Notes").mkdir(parents=True)
+        (tmp_path / "sub" / "TraceVault" / "Notes" / "generated.md").write_text(
+            "no frontmatter"
+        )
+
+        report = check_wiki_health(tmp_path)
+        assert report.files_scanned == 1
+
+    def test_single_file_under_excluded_dir_returns_empty(self, tmp_path: Path):
+        bad_dir = tmp_path / "excluded"
+        bad_dir.mkdir()
+        bad_file = bad_dir / "bad.md"
+        bad_file.write_text("# No frontmatter")
+
+        report = check_wiki_health(
+            bad_file, exclude_dirs=[bad_dir.resolve()]
+        )
+        assert report.files_scanned == 0
+        assert report.passed is True
+
+    def test_exclude_dir_prevents_generated_vault_health_failure(
+        self, tmp_path: Path
+    ):
+        """The core Phase 6C scenario: vault_dir nested in wiki_dir."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        (wiki_dir / "sources").mkdir(parents=True)
+
+        # One valid source note
+        (wiki_dir / "sources" / "real.md").write_text(
+            _valid_note(note_id="real")
+        )
+
+        # Generated vault output with invalid Markdown under non-TraceVault dir
+        # (TraceVault dir is skipped by default; vault_dir needs exclude_dirs)
+        (vault_dir / "output" / "Notes").mkdir(parents=True)
+        (vault_dir / "output" / "Notes" / "generated.md").write_text(
+            "this has no frontmatter and would fail health"
+        )
+
+        # Without exclude_dirs, the non-TraceVault output dir is scanned
+        report_no_exclude = check_wiki_health(wiki_dir)
+        assert report_no_exclude.passed is False
+
+        # With exclude_dirs, only source notes are checked
+        report_with_exclude = check_wiki_health(
+            wiki_dir, exclude_dirs=[vault_dir.resolve()]
+        )
+        assert report_with_exclude.passed is True
+        assert report_with_exclude.files_scanned == 1

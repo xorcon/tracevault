@@ -1006,3 +1006,290 @@ class TestGitignoreRuntimeProtection:
         assert result.returncode != 0, (
             "src/tracevault/wiki/vault/adapter.py should NOT be ignored"
         )
+
+
+# ---------------------------------------------------------------------------
+# 20. P1 — vault_dir nested inside wiki_dir exclusion
+# ---------------------------------------------------------------------------
+
+class TestVaultDirExclusion:
+    """P1: Source collection must exclude vault_dir and TraceVault output."""
+
+    def test_collect_excludes_vault_dir_nested_in_wiki(self, tmp_path: Path):
+        """Source collection skips vault_dir when it is nested inside wiki_dir."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        (wiki_dir / "sources").mkdir(parents=True)
+
+        # Source note
+        _write_synthetic_note(
+            wiki_dir / "sources",
+            "real.md",
+            "---\nnote_id: a\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# Real\n",
+        )
+
+        # Generated vault output inside wiki_dir
+        (vault_dir / "TraceVault" / "Notes").mkdir(parents=True)
+        (vault_dir / "TraceVault" / "Index").mkdir(parents=True)
+        (vault_dir / "TraceVault" / "Notes" / "generated.md").write_text(
+            "this should not be collected"
+        )
+        (vault_dir / "TraceVault" / "Index" / "Home.md").write_text(
+            "this should not be collected either"
+        )
+        (vault_dir / "tracevault-vault-manifest.json").write_text("{}")
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        # Only the real source note should appear
+        assert plan.total_notes == 1
+        assert plan.notes[0].original_filename == "real.md"
+        accepted = [n for n in plan.notes if not n.rejected]
+        assert len(accepted) == 1
+
+    def test_rerun_scenario_generated_vault_not_collected(
+        self, tmp_path: Path
+    ):
+        """Rerun: vault_dir inside wiki_dir with TraceVault output — idempotent."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        (wiki_dir / "sources").mkdir(parents=True)
+
+        # One valid exported source note
+        _write_synthetic_note(
+            wiki_dir / "sources",
+            "original.md",
+            "---\nnote_id: orig\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# Original\n",
+        )
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+
+        # First run — adapt successfully
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+        assert result1.notes_copied == 1
+
+        # Second run — should produce same plan for the original source note
+        plan2 = build_vault_plan(wiki_dir, vault_dir, config=config)
+        # The original source note is still the only source note
+        assert plan2.total_notes == 1
+        assert plan2.notes[0].original_filename == "original.md"
+        # Destination exists, so it should be skipped (not rejected)
+        assert plan2.notes[0].skipped is True
+
+    def test_tracevault_dir_at_wiki_root_excluded(self, tmp_path: Path):
+        """TraceVault directory at any level under wiki_dir is excluded."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+
+        # A TraceVault directory somewhere in wiki
+        (wiki_dir / "TraceVault" / "Notes").mkdir(parents=True)
+        (wiki_dir / "TraceVault" / "Notes" / "stale.md").write_text(
+            "---\nnote_id: stale\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# Stale\n"
+        )
+
+        # A real source note
+        _write_synthetic_note(
+            wiki_dir,
+            "real.md",
+            "---\nnote_id: real\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# Real\n",
+        )
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        assert plan.total_notes == 1
+        assert plan.notes[0].original_filename == "real.md"
+
+
+# ---------------------------------------------------------------------------
+# 21. P2 — case-insensitive destination collision detection
+# ---------------------------------------------------------------------------
+
+class TestCaseInsensitiveCollision:
+    """P2: A.md and a.md must collide on case-insensitive filesystems."""
+
+    def test_case_only_collision_detected_in_build_plan(
+        self, tmp_path: Path
+    ):
+        """A.md and a.md from different subdirs → collision in build_vault_plan."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        (wiki_dir / "sub_a").mkdir()
+        (wiki_dir / "sub_b").mkdir()
+
+        _write_synthetic_note(
+            wiki_dir / "sub_a",
+            "A.md",
+            "---\nnote_id: a\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# A\n",
+        )
+        _write_synthetic_note(
+            wiki_dir / "sub_b",
+            "a.md",
+            "---\nnote_id: b\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# B\n",
+        )
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        assert len(plan.notes) == 2
+        accepted = [n for n in plan.notes if not n.rejected]
+        rejected = plan.rejected_notes
+        assert len(accepted) == 1
+        assert len(rejected) == 1
+        assert rejected[0].collision is True
+        assert "Duplicate destination" in rejected[0].rejection_reason
+
+    def test_apply_defensively_rejects_case_only_duplicate(
+        self, tmp_path: Path
+    ):
+        """apply_vault_plan rejects hand-crafted plan with A.md vs a.md dupes."""
+        vault_dir = tmp_path / "vault"
+        plan = VaultAdaptationPlan(
+            wiki_dir="/fake/wiki",
+            vault_dir=str(vault_dir),
+            health_passed=True,
+            notes=[
+                VaultNotePlan(
+                    source_path="/fake/sub_a/A.md",
+                    relative_source="sub_a/A.md",
+                    destination_path=str(vault_dir / "TraceVault" / "Notes" / "A.md"),
+                    relative_destination="TraceVault/Notes/A.md",
+                    original_filename="A.md",
+                ),
+                VaultNotePlan(
+                    source_path="/fake/sub_b/a.md",
+                    relative_source="sub_b/a.md",
+                    destination_path=str(vault_dir / "TraceVault" / "Notes" / "a.md"),
+                    relative_destination="TraceVault/Notes/a.md",
+                    original_filename="a.md",
+                ),
+            ],
+        )
+
+        result = apply_vault_plan(plan)
+
+        assert vault_dir.exists() is False
+        assert result.notes_copied == 0
+        assert result.errors
+        assert "Duplicate destination" in result.errors[0]
+
+    def test_canonical_destination_key_casefold(self):
+        """canonical_destination_key produces casefolded keys."""
+        from tracevault.wiki.vault.adapter import canonical_destination_key
+
+        p1 = Path("/some/path/Notes/A.md")
+        p2 = Path("/some/path/Notes/a.md")
+
+        k1 = canonical_destination_key(p1)
+        k2 = canonical_destination_key(p2)
+
+        assert k1 == k2
+        assert k1 == k1.lower()
+
+    def test_canonical_destination_key_same_exact_path(self):
+        """Same exact path produces identical canonical keys."""
+        from tracevault.wiki.vault.adapter import canonical_destination_key
+
+        p1 = Path("/some/path/Notes/Note.md")
+        p2 = Path("/some/path/Notes/Note.md")
+
+        assert canonical_destination_key(p1) == canonical_destination_key(p2)
+
+
+# ---------------------------------------------------------------------------
+# 22. P1 — health preflight excludes nested vault_dir (default allow_unhealthy=False)
+# ---------------------------------------------------------------------------
+
+class TestHealthPreflightExcludesNestedVaultDir:
+    """P1 fix: Phase 6B preflight must not scan generated vault output."""
+
+    def test_default_preflight_passes_with_nested_vault_output(
+        self, tmp_path: Path
+    ):
+        """allow_unhealthy=False, vault_dir nested in wiki_dir with invalid
+        generated vault Markdown → health preflight passes, only source note planned."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        (wiki_dir / "sources").mkdir(parents=True)
+
+        # One valid source note (properly exported, passes health)
+        _write_validated_note_to_wiki(
+            wiki_dir / "sources", title="Real Note", note_id="note_real"
+        )
+
+        # Invalid generated vault output (no frontmatter — would fail health)
+        (vault_dir / "TraceVault" / "Notes").mkdir(parents=True)
+        (vault_dir / "TraceVault" / "Index").mkdir(parents=True)
+        (vault_dir / "TraceVault" / "Notes" / "generated.md").write_text(
+            "this has no frontmatter and would fail health check"
+        )
+        (vault_dir / "TraceVault" / "Index" / "Home.md").write_text(
+            "no frontmatter either"
+        )
+
+        # Default: allow_unhealthy=False — must NOT fail because of vault output
+        plan = build_vault_plan(wiki_dir, vault_dir)
+
+        assert plan.health_passed is True
+        assert plan.health_errors == 0
+        assert plan.total_notes == 1
+        assert "real-note" in plan.notes[0].original_filename
+        assert not plan.notes[0].rejected
+        # Generated vault output must not appear in plan
+        for note in plan.notes:
+            assert "generated" not in note.original_filename
+            assert "Home" not in note.original_filename
+
+    def test_negative_control_bad_source_outside_vault_fails_preflight(
+        self, tmp_path: Path
+    ):
+        """Invalid real source note outside vault_dir still fails health preflight."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        wiki_dir.mkdir()
+
+        # One bad source note (outside vault_dir)
+        _write_synthetic_note(
+            wiki_dir,
+            "bad.md",
+            "# No frontmatter, just bad",
+        )
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+
+        assert plan.health_passed is False
+        assert plan.health_errors > 0
+        assert all(n.rejected for n in plan.notes)
+
+    def test_negative_control_bad_source_bad_vault_both_excluded(
+        self, tmp_path: Path
+    ):
+        """Bad source outside vault_dir fails even if vault output is also bad."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        (wiki_dir / "sources").mkdir(parents=True)
+
+        # Bad source note outside vault_dir
+        _write_synthetic_note(
+            wiki_dir / "sources",
+            "bad_source.md",
+            "# This is a real bad source note",
+        )
+
+        # Also bad generated vault output (should be excluded)
+        (vault_dir / "TraceVault" / "Notes").mkdir(parents=True)
+        (vault_dir / "TraceVault" / "Notes" / "generated.md").write_text(
+            "no frontmatter"
+        )
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+
+        # Health fails because of the real source note, not the vault output
+        assert plan.health_passed is False
+        assert plan.health_errors > 0
+        # Only the real source note should be in the plan (vault output excluded)
+        assert plan.total_notes == 1
+        assert plan.notes[0].original_filename == "bad_source.md"
