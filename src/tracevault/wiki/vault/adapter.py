@@ -415,6 +415,10 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
                 f"Failed to copy {note_plan.relative_source}: {exc}"
             )
 
+    # --- Fail-closed: do not write indexes or manifest if any copy failed ---
+    if result.errors:
+        return result
+
     # --- Generate index notes ---
     if config.generate_index:
         for index_plan in plan.index_notes:
