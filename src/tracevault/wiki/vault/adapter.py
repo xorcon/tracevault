@@ -38,20 +38,15 @@ def _collect_wiki_md_files(
 ) -> list[Path]:
     """Collect .md files recursively, sorted for determinism.
 
-    Skips hidden directories (starting with . or _) and any directory
-    named TraceVault (generated vault output).
-
-    Also skips any path that falls under a resolved exclude directory
-    (e.g., vault_dir when it is nested inside wiki_dir).
+    Skips hidden directories (starting with . or _) and any path
+    that falls under a resolved exclude directory (e.g., vault_dir
+    when it is nested inside wiki_dir).
     """
     exclude_dirs = exclude_dirs or []
     files: list[Path] = []
     for child in sorted(wiki_dir.iterdir()):
         if child.is_dir():
             if child.name.startswith((".", "_")):
-                continue
-            # Skip generated TraceVault output directories
-            if child.name == "TraceVault":
                 continue
             # Skip any candidate under an excluded directory
             try:
