@@ -258,17 +258,23 @@ class TestExcludeDirs:
         assert report.files_scanned == 1
         assert report.passed is True
 
-    def test_tracevault_dir_skipped(self, tmp_path: Path):
+    def test_tracevault_dir_not_skipped_without_exclude(self, tmp_path: Path):
+        """P2 fix: generic health scan must NOT silently skip TraceVault/ dirs.
+
+        A TraceVault directory with invalid notes should be detected when
+        no exclude_dirs are provided.
+        """
         (tmp_path / "good.md").write_text(_valid_note(note_id="good"))
         tv = tmp_path / "TraceVault" / "Notes"
         tv.mkdir(parents=True)
-        (tv / "generated.md").write_text("# Generated vault output")
+        (tv / "generated.md").write_text("# No frontmatter")
 
         report = check_wiki_health(tmp_path)
-        assert report.files_scanned == 1
-        assert report.passed is True
+        assert report.files_scanned == 2
+        assert report.passed is False
 
-    def test_tracevault_dir_at_nested_level_skipped(self, tmp_path: Path):
+    def test_tracevault_dir_at_nested_level_not_skipped(self, tmp_path: Path):
+        """P2 fix: nested TraceVault/ directories are also scanned by default."""
         (tmp_path / "sub" / "good.md").parent.mkdir()
         (tmp_path / "sub" / "good.md").write_text(_valid_note(note_id="good"))
         (tmp_path / "sub" / "TraceVault" / "Notes").mkdir(parents=True)
@@ -277,7 +283,19 @@ class TestExcludeDirs:
         )
 
         report = check_wiki_health(tmp_path)
+        assert report.files_scanned == 2
+        assert report.passed is False
+
+    def test_tracevault_dir_skipped_when_excluded(self, tmp_path: Path):
+        """TraceVault/ dir IS skipped when caller passes exclude_dirs."""
+        (tmp_path / "good.md").write_text(_valid_note(note_id="good"))
+        tv = tmp_path / "TraceVault" / "Notes"
+        tv.mkdir(parents=True)
+        (tv / "generated.md").write_text("# No frontmatter")
+
+        report = check_wiki_health(tmp_path, exclude_dirs=[tv.parent.resolve()])
         assert report.files_scanned == 1
+        assert report.passed is True
 
     def test_single_file_under_excluded_dir_returns_empty(self, tmp_path: Path):
         bad_dir = tmp_path / "excluded"
@@ -304,8 +322,7 @@ class TestExcludeDirs:
             _valid_note(note_id="real")
         )
 
-        # Generated vault output with invalid Markdown under non-TraceVault dir
-        # (TraceVault dir is skipped by default; vault_dir needs exclude_dirs)
+        # Generated vault output with invalid Markdown (not skipped by name)
         (vault_dir / "output" / "Notes").mkdir(parents=True)
         (vault_dir / "output" / "Notes" / "generated.md").write_text(
             "this has no frontmatter and would fail health"
@@ -321,3 +338,100 @@ class TestExcludeDirs:
         )
         assert report_with_exclude.passed is True
         assert report_with_exclude.files_scanned == 1
+
+
+# ---------------------------------------------------------------------------
+# P2 fix regression tests: generic health must not skip TraceVault/ by name
+# ---------------------------------------------------------------------------
+
+class TestP2GenericHealthDoesNotSkipTraceVault:
+    """Regression tests for the P2 Codex finding: unconditional TraceVault skip."""
+
+    def test_generic_health_catches_bad_note_in_tracevault_dir(self, tmp_path: Path):
+        """1. check_wiki_health(wiki_dir) must report error for wiki/TraceVault/bad.md."""
+        wiki_dir = tmp_path / "wiki"
+        wiki_dir.mkdir()
+        (wiki_dir / "TraceVault" / "Notes").mkdir(parents=True)
+        (wiki_dir / "TraceVault" / "Notes" / "bad.md").write_text(
+            "---\nnote_id: val\n# No closing"
+        )
+
+        report = check_wiki_health(wiki_dir)
+        assert report.passed is False
+        assert report.error_count >= 1
+
+    def test_generic_health_checks_valid_note_in_tracevault_dir(
+        self, tmp_path: Path
+    ):
+        """2. check_wiki_health(wiki_dir) must include valid notes in TraceVault/."""
+        wiki_dir = tmp_path / "wiki"
+        wiki_dir.mkdir()
+        (wiki_dir / "TraceVault").mkdir()
+        (wiki_dir / "TraceVault" / "good.md").write_text(
+            _valid_note(note_id="tracevault_good")
+        )
+
+        report = check_wiki_health(wiki_dir)
+        assert report.files_scanned == 1
+        assert report.passed is True
+
+    def test_health_with_exclude_dirs_skips_vault_output(self, tmp_path: Path):
+        """3. check_wiki_health with exclude_dirs=[vault_dir] skips vault output."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        (wiki_dir / "sources").mkdir(parents=True)
+
+        # Bad note inside vault_dir (generated output)
+        (vault_dir / "TraceVault" / "Notes").mkdir(parents=True)
+        (vault_dir / "TraceVault" / "Notes" / "bad.md").write_text(
+            "# No frontmatter"
+        )
+
+        # Valid real source note outside vault_dir
+        (wiki_dir / "sources" / "real.md").write_text(_valid_note(note_id="real"))
+
+        report = check_wiki_health(wiki_dir, exclude_dirs=[vault_dir.resolve()])
+        assert report.passed is True
+        assert report.files_scanned == 1
+
+    def test_adapter_still_passes_with_nested_vault_output(self, tmp_path: Path):
+        """4. build_vault_plan() passes when vault_dir contains invalid output,
+        because adapter passes exclude_dirs=[vault_dir]."""
+        from tracevault.wiki.vault.adapter import build_vault_plan
+        from tracevault.wiki.vault.models import VaultAdapterConfig
+
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        (wiki_dir / "sources").mkdir(parents=True)
+
+        # Valid source note
+        (wiki_dir / "sources" / "real.md").write_text(_valid_note(note_id="real"))
+
+        # Invalid generated vault output inside vault_dir
+        (vault_dir / "TraceVault" / "Notes").mkdir(parents=True)
+        (vault_dir / "TraceVault" / "Notes" / "generated.md").write_text(
+            "no frontmatter at all"
+        )
+
+        config = VaultAdapterConfig(generate_index=False)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        assert plan.health_passed is True
+        assert plan.total_notes == 1
+        assert plan.notes[0].original_filename == "real.md"
+
+    def test_negative_control_bad_source_outside_vault_fails(self, tmp_path: Path):
+        """5. Invalid real source note outside vault_dir still fails preflight."""
+        from tracevault.wiki.vault.adapter import build_vault_plan
+
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        wiki_dir.mkdir()
+
+        # Invalid real source note
+        (wiki_dir / "bad_source.md").write_text("# No frontmatter")
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+
+        assert plan.health_passed is False
+        assert plan.health_errors > 0

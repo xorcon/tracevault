@@ -1077,13 +1077,17 @@ class TestVaultDirExclusion:
         # Destination exists, so it should be skipped (not rejected)
         assert plan2.notes[0].skipped is True
 
-    def test_tracevault_dir_at_wiki_root_excluded(self, tmp_path: Path):
-        """TraceVault directory at any level under wiki_dir is excluded."""
+    def test_tracevault_dir_at_wiki_root_included(self, tmp_path: Path):
+        """TraceVault/ at wiki root is collected when vault_dir is a different path.
+
+        Only the configured vault_dir is excluded. Directories named TraceVault
+        that are not under vault_dir are treated as normal source content.
+        """
         wiki_dir = tmp_path / "wiki"
         vault_dir = tmp_path / "vault"
         wiki_dir.mkdir()
 
-        # A TraceVault directory somewhere in wiki
+        # A TraceVault directory somewhere in wiki (not under vault_dir)
         (wiki_dir / "TraceVault" / "Notes").mkdir(parents=True)
         (wiki_dir / "TraceVault" / "Notes" / "stale.md").write_text(
             "---\nnote_id: stale\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# Stale\n"
@@ -1099,8 +1103,75 @@ class TestVaultDirExclusion:
         config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
         plan = build_vault_plan(wiki_dir, vault_dir, config=config)
 
+        # Both notes collected — vault_dir is not under wiki_dir
+        assert plan.total_notes == 2
+        filenames = {n.original_filename for n in plan.notes}
+        assert "real.md" in filenames
+        assert "stale.md" in filenames
+
+    def test_preflight_fails_for_invalid_note_in_tracevault_dir(
+        self, tmp_path: Path
+    ):
+        """build_vault_plan fails preflight for invalid note at
+        wiki_dir/TraceVault/bad.md when vault_dir=wiki_dir/vault.
+
+        TraceVault/ is not under vault_dir, so it must be scanned.
+        """
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        wiki_dir.mkdir()
+
+        (wiki_dir / "TraceVault").mkdir()
+        (wiki_dir / "TraceVault" / "bad.md").write_text("# No frontmatter")
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+
+        assert plan.health_passed is False
+        assert plan.health_errors > 0
+
+    def test_tracevault_source_notes_not_hidden_when_vault_dir_different(
+        self, tmp_path: Path
+    ):
+        """build_vault_plan does not hide valid source notes under
+        wiki_dir/TraceVault/ when vault_dir is a different path."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+
+        (wiki_dir / "TraceVault").mkdir()
+        (wiki_dir / "TraceVault" / "source.md").write_text(
+            "---\nnote_id: src\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# Source\n"
+        )
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
         assert plan.total_notes == 1
-        assert plan.notes[0].original_filename == "real.md"
+        assert plan.notes[0].original_filename == "source.md"
+
+    def test_ignores_invalid_generated_vault_output_under_vault_dir(
+        self, tmp_path: Path
+    ):
+        """build_vault_plan ignores invalid generated vault output under
+        wiki_dir/vault/TraceVault/Notes/ because vault_dir is in exclude_dirs."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        (wiki_dir / "sources").mkdir(parents=True)
+
+        _write_validated_note_to_wiki(
+            wiki_dir / "sources", title="Real Note", note_id="note_real"
+        )
+
+        (vault_dir / "TraceVault" / "Notes").mkdir(parents=True)
+        (vault_dir / "TraceVault" / "Notes" / "bad.md").write_text(
+            "no frontmatter at all"
+        )
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+
+        assert plan.health_passed is True
+        assert plan.total_notes == 1
+        assert "real-note" in plan.notes[0].original_filename
 
 
 # ---------------------------------------------------------------------------
