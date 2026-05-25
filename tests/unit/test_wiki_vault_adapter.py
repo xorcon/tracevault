@@ -1293,3 +1293,103 @@ class TestHealthPreflightExcludesNestedVaultDir:
         # Only the real source note should be in the plan (vault output excluded)
         assert plan.total_notes == 1
         assert plan.notes[0].original_filename == "bad_source.md"
+
+
+# ---------------------------------------------------------------------------
+# 23. P1/P2 — partial copy failure: fail-closed no manifest/index
+# ---------------------------------------------------------------------------
+
+class TestPartialCopyFailure:
+    """P1: Manifest must not claim notes that weren't copied.
+    P2: Indexes must not link to notes that weren't copied.
+    Preferred behavior: fail-closed — no manifest/index on copy failure.
+    """
+
+    def test_copy_oserror_prevents_manifest_and_index(self, tmp_path: Path):
+        """If shutil.copy2 raises OSError mid-batch, no manifest or indexes
+        are written and result.success is False."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="First", note_id="n_1")
+        _write_validated_note_to_wiki(wiki_dir, title="Second", note_id="n_2")
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+        # Both notes should be accepted in the plan
+        assert len(plan.accepted_notes) == 2
+
+        # Mock shutil.copy2 to succeed once then fail
+        import unittest.mock
+        call_count = [0]
+        original_copy2 = __import__("shutil").copy2
+
+        def side_effect_copy2(src, dst):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                original_copy2(src, dst)
+            else:
+                raise OSError(2, "Permission denied", dst)
+
+        with unittest.mock.patch(
+            "tracevault.wiki.vault.adapter.shutil.copy2", side_effect=side_effect_copy2
+        ):
+            result = apply_vault_plan(plan)
+
+        # The second copy should have failed
+        assert result.success is False
+        assert len(result.errors) == 1
+        assert result.notes_copied == 1
+        assert result.manifest_written is False
+        assert result.index_notes_written == 0
+
+        # Manifest must not exist
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+        # Index files must not exist
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+    def test_source_disappears_before_apply_returns_error(self, tmp_path: Path):
+        """If a source file disappears after build_vault_plan, apply returns
+        success=False without writing manifest or indexes."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+        assert len(plan.accepted_notes) == 2
+
+        # Delete one source file between plan and apply
+        source_to_delete = Path(plan.notes[1].source_path)
+        source_to_delete.unlink()
+
+        result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert result.manifest_written is False
+        assert result.index_notes_written == 0
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+
+    def test_successful_path_still_writes_manifest_and_index(
+        self, tmp_path: Path
+    ):
+        """Happy path: all copies succeed → manifest and indexes are written."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+
+        assert result.success is True
+        assert result.notes_copied == 2
+        assert result.manifest_written is True
+        assert result.index_notes_written == 3
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
