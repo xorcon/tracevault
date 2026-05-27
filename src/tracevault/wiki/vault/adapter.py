@@ -379,6 +379,110 @@ def _fail_with_cleanup(
     return result
 
 
+def _validate_index_targets(
+    plan: VaultAdaptationPlan,
+    result: VaultAdaptationResult,
+) -> bool:
+    """Validate ownership of reserved index file targets before overwriting.
+
+    Only runs when config.generate_index=True, because the adapter must not
+    block on user-authored index files when this run will not write them.
+
+    Returns True if all index targets are safe (or not being written).
+    On failure, records errors and returns False.
+    """
+    config = plan.config or VaultAdapterConfig()
+    if not config.generate_index:
+        return True
+
+    vault_dir = Path(plan.vault_dir)
+    index_dir = resolve_index_dir(vault_dir)
+    index_files = [
+        index_dir / "Home.md",
+        index_dir / "By-Type.md",
+        index_dir / "By-Source.md",
+    ]
+
+    for path in index_files:
+        if not path.is_file():
+            continue
+        if not _is_generated_index_file(path):
+            result.errors.append(
+                f"Reserved path '{path.relative_to(vault_dir)}' is "
+                "user-authored and cannot be overwritten by the adapter."
+            )
+    return len(result.errors) == 0
+
+
+def _validate_manifest_target(
+    plan: VaultAdaptationPlan,
+    result: VaultAdaptationResult,
+) -> bool:
+    """Validate ownership of the manifest target before overwriting.
+
+    Always runs because the manifest is written on every successful apply.
+
+    Returns True if the manifest target is safe (or doesn't exist).
+    On failure, records errors and returns False.
+    """
+    vault_dir = Path(plan.vault_dir)
+    manifest_path = resolve_manifest_path(vault_dir)
+    if not manifest_path.is_file():
+        return True
+
+    try:
+        manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        result.errors.append(
+            f"Reserved path '{manifest_path.relative_to(vault_dir)}' is "
+            "unreadable and cannot be overwritten by the adapter."
+        )
+        return False
+    else:
+        is_owned = (
+            isinstance(manifest_data, dict)
+            and manifest_data.get("generated_by")
+            == "tracevault-vault-adapter"
+        )
+        if not is_owned:
+            result.errors.append(
+                f"Reserved path '{manifest_path.relative_to(vault_dir)}' is "
+                "not owned by the adapter and cannot be overwritten."
+            )
+            return False
+    return True
+
+
+def _validate_reserved_targets(
+    plan: VaultAdaptationPlan,
+    result: VaultAdaptationResult,
+) -> bool:
+    """Validate ownership of reserved generated targets before overwriting.
+
+    Before the adapter overwrites reserved paths, it must confirm they are
+    not user-authored.  This prevents the following scenario:
+
+      1. Run overwrites a user-authored Home.md with adapter content + marker.
+      2. Manifest write fails; cleanup runs.
+      3. Cleanup sees the marker and deletes the (now overwritten) file.
+
+    Index-file validation runs only when config.generate_index=True.
+    Manifest validation always runs because the manifest is written every run.
+
+    Returns True if all targets are safe to write.  On failure, records
+    errors, runs cleanup for stale adapter-owned artifacts, and returns
+    False.
+    """
+    index_ok = _validate_index_targets(plan, result)
+    manifest_ok = _validate_manifest_target(plan, result)
+
+    if not (index_ok and manifest_ok):
+        _cleanup_stale_generated_outputs(plan, result)
+        return False
+
+    return True
+
+
 def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
     """Apply a vault adaptation plan to the filesystem.
 
@@ -454,6 +558,10 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
                 plan, result,
                 f"Cannot create parent path: {parent}",
             )
+
+    # (f) Validate reserved generated targets ownership
+    if not _validate_reserved_targets(plan, result):
+        return result
 
     # === Write phase (only reached if all validation passes) ===
 
