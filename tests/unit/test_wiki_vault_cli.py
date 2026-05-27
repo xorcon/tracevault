@@ -320,3 +320,62 @@ class TestWikiVaultCollisionCLI:
         )
 
         assert not vault_dir.exists()
+
+    def test_plan_non_zero_on_case_only_collision(self, tmp_path: Path):
+        """CLI must exit non-zero when A.md and a.md collide (case-insensitive)."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        (wiki_dir / "sub_a").mkdir()
+        (wiki_dir / "sub_b").mkdir()
+
+        # A.md in sub_a, a.md in sub_b — case-only collision
+        (wiki_dir / "sub_a" / "A.md").write_text(
+            "---\nnote_id: a\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# A\n"
+        )
+        (wiki_dir / "sub_b" / "a.md").write_text(
+            "---\nnote_id: b\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# B\n"
+        )
+
+        result = _run_cli(
+            [
+                "wiki-vault-plan",
+                str(wiki_dir),
+                "--vault-dir", str(vault_dir),
+                "--json",
+                "--allow-unhealthy",
+            ],
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode != 0
+        output = json.loads(result.stdout)
+        assert output["rejected"] >= 1
+
+    def test_adapt_non_zero_on_case_only_collision(self, tmp_path: Path):
+        """wiki-vault-adapt must exit non-zero with case-only duplicate destinations."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        (wiki_dir / "sub_a").mkdir()
+        (wiki_dir / "sub_b").mkdir()
+
+        (wiki_dir / "sub_a" / "A.md").write_text(
+            "---\nnote_id: a\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# A\n"
+        )
+        (wiki_dir / "sub_b" / "a.md").write_text(
+            "---\nnote_id: b\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# B\n"
+        )
+
+        result = _run_cli(
+            [
+                "wiki-vault-adapt",
+                str(wiki_dir),
+                str(vault_dir),
+                "--json",
+                "--allow-unhealthy",
+            ],
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode != 0

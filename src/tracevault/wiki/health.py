@@ -175,16 +175,14 @@ def _collect_md_files(
     """Collect .md files recursively, sorted for determinism.
 
     Skips hidden directories (starting with . or _) and any path
-    under an excluded directory (e.g., generated vault output).
+    under an excluded directory (e.g., generated vault output passed
+    via exclude_dirs).
     """
     exclude_dirs = exclude_dirs or []
     files: list[Path] = []
     for child in sorted(root.iterdir()):
         if child.is_dir():
             if child.name.startswith((".", "_")):
-                continue
-            # Skip generated TraceVault output directories
-            if child.name == "TraceVault":
                 continue
             # Skip directories under excluded paths
             try:

@@ -1077,13 +1077,17 @@ class TestVaultDirExclusion:
         # Destination exists, so it should be skipped (not rejected)
         assert plan2.notes[0].skipped is True
 
-    def test_tracevault_dir_at_wiki_root_excluded(self, tmp_path: Path):
-        """TraceVault directory at any level under wiki_dir is excluded."""
+    def test_tracevault_dir_at_wiki_root_included(self, tmp_path: Path):
+        """TraceVault/ at wiki root is collected when vault_dir is a different path.
+
+        Only the configured vault_dir is excluded. Directories named TraceVault
+        that are not under vault_dir are treated as normal source content.
+        """
         wiki_dir = tmp_path / "wiki"
         vault_dir = tmp_path / "vault"
         wiki_dir.mkdir()
 
-        # A TraceVault directory somewhere in wiki
+        # A TraceVault directory somewhere in wiki (not under vault_dir)
         (wiki_dir / "TraceVault" / "Notes").mkdir(parents=True)
         (wiki_dir / "TraceVault" / "Notes" / "stale.md").write_text(
             "---\nnote_id: stale\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# Stale\n"
@@ -1099,8 +1103,75 @@ class TestVaultDirExclusion:
         config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
         plan = build_vault_plan(wiki_dir, vault_dir, config=config)
 
+        # Both notes collected — vault_dir is not under wiki_dir
+        assert plan.total_notes == 2
+        filenames = {n.original_filename for n in plan.notes}
+        assert "real.md" in filenames
+        assert "stale.md" in filenames
+
+    def test_preflight_fails_for_invalid_note_in_tracevault_dir(
+        self, tmp_path: Path
+    ):
+        """build_vault_plan fails preflight for invalid note at
+        wiki_dir/TraceVault/bad.md when vault_dir=wiki_dir/vault.
+
+        TraceVault/ is not under vault_dir, so it must be scanned.
+        """
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        wiki_dir.mkdir()
+
+        (wiki_dir / "TraceVault").mkdir()
+        (wiki_dir / "TraceVault" / "bad.md").write_text("# No frontmatter")
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+
+        assert plan.health_passed is False
+        assert plan.health_errors > 0
+
+    def test_tracevault_source_notes_not_hidden_when_vault_dir_different(
+        self, tmp_path: Path
+    ):
+        """build_vault_plan does not hide valid source notes under
+        wiki_dir/TraceVault/ when vault_dir is a different path."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+
+        (wiki_dir / "TraceVault").mkdir()
+        (wiki_dir / "TraceVault" / "source.md").write_text(
+            "---\nnote_id: src\nnote_type: t\nstatus: published\nevidence_count: 0\n---\n# Source\n"
+        )
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
         assert plan.total_notes == 1
-        assert plan.notes[0].original_filename == "real.md"
+        assert plan.notes[0].original_filename == "source.md"
+
+    def test_ignores_invalid_generated_vault_output_under_vault_dir(
+        self, tmp_path: Path
+    ):
+        """build_vault_plan ignores invalid generated vault output under
+        wiki_dir/vault/TraceVault/Notes/ because vault_dir is in exclude_dirs."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = wiki_dir / "vault"
+        (wiki_dir / "sources").mkdir(parents=True)
+
+        _write_validated_note_to_wiki(
+            wiki_dir / "sources", title="Real Note", note_id="note_real"
+        )
+
+        (vault_dir / "TraceVault" / "Notes").mkdir(parents=True)
+        (vault_dir / "TraceVault" / "Notes" / "bad.md").write_text(
+            "no frontmatter at all"
+        )
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+
+        assert plan.health_passed is True
+        assert plan.total_notes == 1
+        assert "real-note" in plan.notes[0].original_filename
 
 
 # ---------------------------------------------------------------------------
@@ -1293,3 +1364,1714 @@ class TestHealthPreflightExcludesNestedVaultDir:
         # Only the real source note should be in the plan (vault output excluded)
         assert plan.total_notes == 1
         assert plan.notes[0].original_filename == "bad_source.md"
+
+
+# ---------------------------------------------------------------------------
+# 23. Stale artifact cleanup on copy failure
+# ---------------------------------------------------------------------------
+
+class TestStaleArtifactCleanup:
+    """When a note copy fails, stale generated artifacts from a previous
+    successful adaptation must be removed so a failed rerun does not look
+    valid to downstream tooling.
+    """
+
+    def test_stale_manifest_and_indexes_removed_on_rerun_copy_failure(
+        self, tmp_path: Path
+    ):
+        """Previous successful adaptation creates manifest/index.
+        Rerun with copy failure: stale artifacts cleaned up, copied notes kept.
+        """
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="Alpha", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="Beta", note_id="n_b")
+
+        # --- First run: successful adaptation ---
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+        assert result1.success is True
+        assert result1.notes_copied == 2
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+        # Remember copied note files from the first run
+        notes_after_run1 = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+        assert len(notes_after_run1) == 2
+
+        # --- Second run: simulate copy failure ---
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+        assert len(plan.accepted_notes) == 2
+
+        import unittest.mock
+        call_count = [0]
+        original_copy2 = __import__("shutil").copy2
+
+        def side_effect_copy2(src, dst):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                original_copy2(src, dst)
+            else:
+                raise OSError(2, "Permission denied", dst)
+
+        with unittest.mock.patch(
+            "tracevault.wiki.vault.adapter.shutil.copy2",
+            side_effect=side_effect_copy2,
+        ):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        assert len(result2.errors) >= 1
+        assert result2.notes_copied == 1
+
+        # Stale manifest and index files must be removed
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+        # Copied note files must NOT be deleted
+        notes_after_fail = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+        assert len(notes_after_fail) == len(notes_after_run1)
+
+    def test_cleanup_failure_recorded_as_error(self, tmp_path: Path):
+        """If stale artifact cleanup itself fails (OSError), the error is
+        recorded and result.success is still False.
+        """
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+
+        # --- First run: success ---
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+        assert result1.success is True
+
+        # --- Second run: copy fails + cleanup (unlink) also fails ---
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+        original_copy2 = __import__("shutil").copy2
+        call_count = [0]
+        copy_succeeded = [False]
+
+        def side_effect_copy2(src, dst):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                copy_succeeded[0] = True
+                original_copy2(src, dst)
+            else:
+                raise OSError(2, "Permission denied", dst)
+
+        def side_effect_unlink(missing_ok=False):
+            raise PermissionError("cannot remove stale artifact")
+
+        with unittest.mock.patch(
+            "tracevault.wiki.vault.adapter.shutil.copy2",
+            side_effect=side_effect_copy2,
+        ):
+            with unittest.mock.patch.object(
+                Path, "unlink", side_effect=side_effect_unlink
+            ):
+                result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        # Should have copy error AND cleanup errors
+        cleanup_errors = [e for e in result2.errors if "stale artifact" in e]
+        assert len(cleanup_errors) > 0
+
+    def test_successful_path_still_writes_manifest_and_index(
+        self, tmp_path: Path
+    ):
+        """Happy path is unchanged: all copies succeed → manifest + indexes written."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+
+        assert result.success is True
+        assert result.notes_copied == 2
+        assert result.manifest_written is True
+        assert result.index_notes_written == 3
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+    def test_cleanup_always_removes_stale_generated_artifacts(
+        self, tmp_path: Path
+    ):
+        """Cleanup removes stale generated artifacts regardless of current
+        generate_index config — a previous run may have written indexes."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+
+        # --- First run: success WITH index ---
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+        assert result1.success is True
+        assert result1.index_notes_written == 3
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+
+        # --- Second run: copy fails, generate_index=False ---
+        config2 = VaultAdapterConfig(generate_index=False, allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+
+        import unittest.mock
+        original_copy2 = __import__("shutil").copy2
+        call_count = [0]
+
+        def side_effect_copy2(src, dst):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                original_copy2(src, dst)
+            else:
+                raise OSError(2, "Permission denied", dst)
+
+        with unittest.mock.patch(
+            "tracevault.wiki.vault.adapter.shutil.copy2",
+            side_effect=side_effect_copy2,
+        ):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        # Both manifest AND stale generated indexes are cleaned up
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# 24. P1/P2 — partial copy failure: fail-closed no manifest/index
+# ---------------------------------------------------------------------------
+
+class TestPartialCopyFailure:
+    """P1: Manifest must not claim notes that weren't copied.
+    P2: Indexes must not link to notes that weren't copied.
+    Preferred behavior: fail-closed — no manifest/index on copy failure.
+    """
+
+    def test_copy_oserror_prevents_manifest_and_index(self, tmp_path: Path):
+        """If shutil.copy2 raises OSError mid-batch, no manifest or indexes
+        are written and result.success is False."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="First", note_id="n_1")
+        _write_validated_note_to_wiki(wiki_dir, title="Second", note_id="n_2")
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+        # Both notes should be accepted in the plan
+        assert len(plan.accepted_notes) == 2
+
+        # Mock shutil.copy2 to succeed once then fail
+        import unittest.mock
+        call_count = [0]
+        original_copy2 = __import__("shutil").copy2
+
+        def side_effect_copy2(src, dst):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                original_copy2(src, dst)
+            else:
+                raise OSError(2, "Permission denied", dst)
+
+        with unittest.mock.patch(
+            "tracevault.wiki.vault.adapter.shutil.copy2", side_effect=side_effect_copy2
+        ):
+            result = apply_vault_plan(plan)
+
+        # The second copy should have failed
+        assert result.success is False
+        assert len(result.errors) == 1
+        assert result.notes_copied == 1
+        assert result.manifest_written is False
+        assert result.index_notes_written == 0
+
+        # Manifest must not exist
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+        # Index files must not exist
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+    def test_source_disappears_before_apply_returns_error(self, tmp_path: Path):
+        """If a source file disappears after build_vault_plan, apply returns
+        success=False without writing manifest or indexes."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+
+        plan = build_vault_plan(wiki_dir, vault_dir)
+        assert len(plan.accepted_notes) == 2
+
+        # Delete one source file between plan and apply
+        source_to_delete = Path(plan.notes[1].source_path)
+        source_to_delete.unlink()
+
+        result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert result.manifest_written is False
+        assert result.index_notes_written == 0
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+
+    def test_successful_path_still_writes_manifest_and_index(
+        self, tmp_path: Path
+    ):
+        """Happy path: all copies succeed → manifest and indexes are written."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+
+        assert result.success is True
+        assert result.notes_copied == 2
+        assert result.manifest_written is True
+        assert result.index_notes_written == 3
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# 25. P3 — marker-based cleanup: never delete user-authored files
+# ---------------------------------------------------------------------------
+
+class TestMarkerBasedCleanup:
+    """Cleanup must only remove files that carry the adapter-generated marker.
+
+    User-authored files at reserved paths must survive copy failure.
+    """
+
+    def _setup_wiki_and_first_run(self, tmp_path: Path):
+        """Create wiki notes and return wiki_dir / vault_dir."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+        return wiki_dir, vault_dir
+
+    def _simulate_partial_copy_failure(self, plan):
+        """Mock shutil.copy2 so only the first copy succeeds."""
+        import unittest.mock
+        original_copy2 = __import__("shutil").copy2
+        call_count = [0]
+
+        def side_effect_copy2(src, dst):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                original_copy2(src, dst)
+            else:
+                raise OSError(2, "Permission denied", dst)
+
+        return unittest.mock.patch(
+            "tracevault.wiki.vault.adapter.shutil.copy2",
+            side_effect=side_effect_copy2,
+        )
+
+    def test_user_authored_home_index_not_deleted(self, tmp_path: Path):
+        """User-authored Home.md without generated marker survives cleanup."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+
+        # First run creates adapter-owned artifacts
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+        assert result1.success is True
+
+        # Replace Home.md with user-authored content (no marker)
+        (vault_dir / INDEX_SUBDIR / "Home.md").write_text(
+            "# My Custom Home\n\nI wrote this.\n"
+        )
+
+        # Second run: simulate copy failure
+        config2 = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+        with self._simulate_partial_copy_failure(plan):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        # User-authored Home.md must remain
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        content = (vault_dir / INDEX_SUBDIR / "Home.md").read_text()
+        assert "My Custom Home" in content
+
+    def test_user_authored_by_type_not_deleted(self, tmp_path: Path):
+        """User-authored By-Type.md without generated marker survives cleanup."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+        adapt_to_obsidian_vault(wiki_dir, vault_dir)
+
+        # Replace By-Type.md with user-authored content
+        (vault_dir / INDEX_SUBDIR / "By-Type.md").write_text(
+            "# My Type Index\n\nCustom grouping.\n"
+        )
+
+        config2 = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+        with self._simulate_partial_copy_failure(plan):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        assert (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert "Custom grouping" in (
+            vault_dir / INDEX_SUBDIR / "By-Type.md"
+        ).read_text()
+
+    def test_unrelated_index_files_not_deleted(self, tmp_path: Path):
+        """Manual.md under TraceVault/Index/ survives cleanup."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+        adapt_to_obsidian_vault(wiki_dir, vault_dir)
+
+        # Create a non-reserved file in the index directory
+        (vault_dir / INDEX_SUBDIR / "Manual.md").write_text(
+            "# Manual Index\n\nI maintain this.\n"
+        )
+
+        config2 = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+        with self._simulate_partial_copy_failure(plan):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        # Non-reserved index file must remain
+        assert (vault_dir / INDEX_SUBDIR / "Manual.md").exists()
+
+    def test_non_adapter_manifest_not_deleted(self, tmp_path: Path):
+        """Manifest without generated_by marker survives cleanup."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+        adapt_to_obsidian_vault(wiki_dir, vault_dir)
+
+        # Replace manifest with non-adapter version
+        import json as _json
+        (vault_dir / MANIFEST_FILENAME).write_text(
+            _json.dumps({"version": "custom-v1", "notes": []})
+        )
+
+        config2 = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+        with self._simulate_partial_copy_failure(plan):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        data = _json.loads(
+            (vault_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert data["version"] == "custom-v1"
+
+    def test_malformed_manifest_not_deleted(self, tmp_path: Path):
+        """Malformed JSON manifest survives cleanup."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+        adapt_to_obsidian_vault(wiki_dir, vault_dir)
+
+        # Replace manifest with invalid JSON
+        (vault_dir / MANIFEST_FILENAME).write_text("{ invalid json }")
+
+        config2 = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+        with self._simulate_partial_copy_failure(plan):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+
+    def test_adapter_generated_manifest_removed_on_copy_failure(
+        self, tmp_path: Path
+    ):
+        """Adapter-generated manifest IS cleaned up on copy failure."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+        assert result1.success is True
+
+        config2 = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+        with self._simulate_partial_copy_failure(plan):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+
+    def test_adapter_generated_indexes_removed_on_copy_failure(
+        self, tmp_path: Path
+    ):
+        """Adapter-generated index files ARE cleaned up on copy failure."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+        assert result1.success is True
+
+        config2 = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+        with self._simulate_partial_copy_failure(plan):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+    def test_successful_path_writes_manifest_with_generated_by(
+        self, tmp_path: Path
+    ):
+        """Happy path manifest contains the generated_by ownership field."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+
+        assert result.success is True
+        data = json.loads(
+            (vault_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert data["generated_by"] == "tracevault-vault-adapter"
+
+    def test_successful_path_writes_index_with_generated_marker(
+        self, tmp_path: Path
+    ):
+        """Happy path index files contain the tracevault-generated marker."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+
+        assert result.success is True
+        for filename in ("Home.md", "By-Type.md", "By-Source.md"):
+            content = (vault_dir / INDEX_SUBDIR / filename).read_text(
+                encoding="utf-8"
+            )
+            assert "<!-- tracevault-generated: vault-index -->" in content
+
+    def test_copied_notes_survive_cleanup(self, tmp_path: Path):
+        """Copied note files under TraceVault/Notes are never deleted by cleanup."""
+        wiki_dir, vault_dir = self._setup_wiki_and_first_run(tmp_path)
+
+        # First run: full success
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+        assert result1.success is True
+        notes_after_run1 = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+
+        # Second run: copy failure
+        config2 = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+        with self._simulate_partial_copy_failure(plan):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        # Copied notes must remain
+        notes_after_fail = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+        assert len(notes_after_fail) == len(notes_after_run1)
+
+
+# ---------------------------------------------------------------------------
+# 26. Stale artifact cleanup on early validation failure (PR #13 Codex finding)
+# ---------------------------------------------------------------------------
+
+class _StaleCleanupFixture:
+    """Shared fixture for stale-cleanup-on-failure tests.
+
+    Sets up a successful first run, then triggers a specific validation
+    failure and verifies adapter-owned generated artifacts are removed.
+    """
+
+    def setup_first_run(self, tmp_path: Path):
+        """Create wiki/vault dirs, write notes, run successful adaptation.
+        Returns (wiki_dir, vault_dir).
+        """
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+        assert result1.success is True
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        return wiki_dir, vault_dir
+
+    def assert_artifacts_cleaned(self, vault_dir: Path):
+        """Assert adapter-owned manifest and index files are removed."""
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+    def assert_notes_survive(self, vault_dir: Path):
+        """Assert copied note files under TraceVault/Notes are preserved."""
+        notes = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+        assert len(notes) >= 1
+
+
+class TestEarlyValidationFailureCleanup:
+    """Any failed apply_vault_plan() path must remove stale adapter-owned
+    generated artifacts before returning failure."""
+
+    fixture = _StaleCleanupFixture()
+
+    # --- (a) health preflight failure ---
+
+    def test_health_failure_removes_stale_artifacts(self, tmp_path: Path):
+        """Previous successful run creates adapter manifest/index.
+        Failed rerun due to health_passed=False removes adapter-owned artifacts."""
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        # Build a plan that fails health preflight
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=False,
+            health_errors=3,
+            notes=[],
+        )
+        result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert "Health preflight failed" in result.errors[0]
+        self.fixture.assert_artifacts_cleaned(vault_dir)
+
+    # --- (b) rejected note validation ---
+
+    def test_rejected_note_removes_stale_artifacts(self, tmp_path: Path):
+        """Previous successful run creates adapter manifest/index.
+        Failed rerun due to rejected note removes adapter-owned artifacts."""
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=True,
+            notes=[
+                VaultNotePlan(
+                    source_path=str(wiki_dir / "note.md"),
+                    relative_source="note.md",
+                    destination_path=str(vault_dir / NOTES_SUBDIR / "note.md"),
+                    relative_destination="note.md",
+                    original_filename="note.md",
+                    rejected=True,
+                    rejection_reason="some reason",
+                ),
+            ],
+        )
+        result = apply_vault_plan(plan)
+
+        assert result.success is False
+        self.fixture.assert_artifacts_cleaned(vault_dir)
+
+    # --- (c) duplicate destination validation ---
+
+    def test_duplicate_destination_removes_stale_artifacts(self, tmp_path: Path):
+        """Previous successful run creates adapter manifest/index.
+        Failed rerun due to duplicate destination validation removes artifacts."""
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=True,
+            notes=[
+                VaultNotePlan(
+                    source_path="/fake/a.md",
+                    relative_source="a.md",
+                    destination_path=str(vault_dir / "TraceVault" / "Notes" / "x.md"),
+                    relative_destination="TraceVault/Notes/x.md",
+                    original_filename="x.md",
+                ),
+                VaultNotePlan(
+                    source_path="/fake/b.md",
+                    relative_source="b.md",
+                    destination_path=str(vault_dir / "TraceVault" / "Notes" / "x.md"),
+                    relative_destination="TraceVault/Notes/x.md",
+                    original_filename="x.md",
+                ),
+            ],
+        )
+        result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert "Duplicate destination" in result.errors[0]
+        self.fixture.assert_artifacts_cleaned(vault_dir)
+
+    # --- (d) missing source / readability validation ---
+
+    def test_missing_source_removes_stale_artifacts(self, tmp_path: Path):
+        """Previous successful run creates adapter manifest/index.
+        Failed rerun due to missing source removes adapter-owned artifacts."""
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=True,
+            notes=[
+                VaultNotePlan(
+                    source_path="/nonexistent/source.md",
+                    relative_source="source.md",
+                    destination_path=str(vault_dir / NOTES_SUBDIR / "source.md"),
+                    relative_destination="source.md",
+                    original_filename="source.md",
+                ),
+            ],
+        )
+        result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert "Source file not found" in result.errors[0]
+        self.fixture.assert_artifacts_cleaned(vault_dir)
+
+    # --- (e) parent/destination validation failure ---
+
+    def test_parent_path_failure_removes_stale_artifacts(
+        self, tmp_path: Path
+    ):
+        """Previous successful run creates adapter manifest/index.
+        Failed rerun due to parent path validation removes artifacts.
+
+        On Linux, / always exists, so parent validation (e) always passes
+        for paths under /. We make the destination parent a regular file
+        so is_dir() returns False during validation.
+        """
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        # Use a real source file so (d) passes and (e) triggers
+        source_files = list(wiki_dir.glob("*.md"))
+        assert len(source_files) >= 1
+        real_source = source_files[0]
+
+        # Create a file at the destination parent path — is_dir() will be False
+        impossible_parent = vault_dir / "impossible-file-not-dir"
+        impossible_parent.write_text("this is a file, not a directory")
+
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=True,
+            notes=[
+                VaultNotePlan(
+                    source_path=str(real_source),
+                    relative_source=real_source.name,
+                    destination_path=str(
+                        impossible_parent / "nested" / real_source.name
+                    ),
+                    relative_destination="a.md",
+                    original_filename=real_source.name,
+                ),
+            ],
+        )
+
+        result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert "Cannot create parent path" in result.errors[0]
+        self.fixture.assert_artifacts_cleaned(vault_dir)
+
+
+class TestEarlyValidationFailureSafety:
+    """Cleanup on early validation failure must not touch user-authored files."""
+
+    fixture = _StaleCleanupFixture()
+
+    def test_notes_survive_health_failure(self, tmp_path: Path):
+        """TraceVault/Notes files remain after health preflight failure cleanup."""
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=False,
+            health_errors=2,
+            notes=[],
+        )
+        apply_vault_plan(plan)
+
+        self.fixture.assert_notes_survive(vault_dir)
+
+    def test_notes_survive_rejected_note_failure(self, tmp_path: Path):
+        """TraceVault/Notes files remain after rejected-note failure cleanup."""
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=True,
+            notes=[
+                VaultNotePlan(
+                    source_path="/fake/n.md",
+                    relative_source="n.md",
+                    destination_path=str(vault_dir / NOTES_SUBDIR / "n.md"),
+                    relative_destination="n.md",
+                    original_filename="n.md",
+                    rejected=True,
+                    rejection_reason="x",
+                ),
+            ],
+        )
+        apply_vault_plan(plan)
+
+        self.fixture.assert_notes_survive(vault_dir)
+
+    def test_user_authored_index_survives_early_failure(self, tmp_path: Path):
+        """User-authored index files without marker survive early-failure cleanup."""
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        # Replace Home.md with user-authored content (no marker)
+        (vault_dir / INDEX_SUBDIR / "Home.md").write_text(
+            "# My Custom Home\n\nUser written.\n"
+        )
+
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=False,
+            health_errors=2,
+            notes=[],
+        )
+        apply_vault_plan(plan)
+
+        # User-authored Home.md must remain
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert "My Custom Home" in (
+            vault_dir / INDEX_SUBDIR / "Home.md"
+        ).read_text()
+
+    def test_non_adapter_manifest_survives_early_failure(self, tmp_path: Path):
+        """Non-adapter manifest survives early-failure cleanup."""
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        # Replace with non-adapter manifest
+        (vault_dir / MANIFEST_FILENAME).write_text(
+            '{"version": "custom-v1", "notes": []}'
+        )
+
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=False,
+            health_errors=2,
+            notes=[],
+        )
+        apply_vault_plan(plan)
+
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        data = json.loads(
+            (vault_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert data["version"] == "custom-v1"
+
+    def test_malformed_manifest_survives_early_failure(self, tmp_path: Path):
+        """Malformed manifest survives early-failure cleanup."""
+        wiki_dir, vault_dir = self.fixture.setup_first_run(tmp_path)
+
+        (vault_dir / MANIFEST_FILENAME).write_text("{ invalid json }")
+
+        plan = VaultAdaptationPlan(
+            wiki_dir=str(wiki_dir),
+            vault_dir=str(vault_dir),
+            health_passed=False,
+            health_errors=2,
+            notes=[],
+        )
+        apply_vault_plan(plan)
+
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+
+
+# ---------------------------------------------------------------------------
+# 27. Stale artifact cleanup on write-phase failures (PR #13 Codex finding)
+# ---------------------------------------------------------------------------
+
+class TestWritePhaseFailureCleanup:
+    """apply_vault_plan() must run stale artifact cleanup on:
+    1. base directory creation failure
+    2. index write failure after note copies succeed
+    3. manifest write failure after note/index writes
+    """
+
+    def _setup_first_run(self, tmp_path: Path):
+        """Run a successful first adaptation, return (wiki_dir, vault_dir)."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir)
+        assert result1.success is True
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        return wiki_dir, vault_dir
+
+    def _assert_artifacts_cleaned(self, vault_dir: Path):
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+    # -- 1. Base directory creation failure --
+
+    def test_base_dir_creation_failure_removes_stale_artifacts(
+        self, tmp_path: Path
+    ):
+        """Previous successful run creates adapter-owned manifest/index.
+        Failed rerun due to base directory creation failure removes them."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+
+        import shutil as _shutil
+        _shutil.rmtree(vault_dir)
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class MkdirFailsPath(Path):
+            def mkdir(self, *a, **k):
+                raise OSError(13, "Permission denied", str(self))
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", MkdirFailsPath, create=False
+        ):
+            result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert "Failed to create vault directories" in result.errors[0]
+        self._assert_artifacts_cleaned(vault_dir)
+
+    def test_base_dir_creation_failure_no_cleanup_errors(self, tmp_path: Path):
+        """Cleanup on base dir failure does not add errors when artifacts
+        were already removed or don't exist."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+
+        import shutil as _shutil
+        _shutil.rmtree(vault_dir)
+        vault_dir.mkdir()
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class MkdirFailsPath(Path):
+            def mkdir(self, *a, **k):
+                raise OSError(13, "Permission denied", str(self))
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", MkdirFailsPath, create=False
+        ):
+            result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert len(result.errors) == 1
+        assert "Failed to create vault directories" in result.errors[0]
+
+    # -- 2. Index write failure --
+
+    def test_index_write_failure_removes_stale_artifacts(self, tmp_path: Path):
+        """Previous successful run creates adapter-owned manifest/index.
+        Failed rerun due to index write failure removes them."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class IndexFailsPath(Path):
+            def write_text(self, *a, **k):
+                if "Index" in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", IndexFailsPath, create=False
+        ):
+            result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert any("Failed to write index" in e for e in result.errors)
+        self._assert_artifacts_cleaned(vault_dir)
+
+    def test_index_write_failure_notes_survive(self, tmp_path: Path):
+        """Copied note files remain after index write failure cleanup."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+        notes_before = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class IndexFailsPath(Path):
+            def write_text(self, *a, **k):
+                if "Index" in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", IndexFailsPath, create=False
+        ):
+            result = apply_vault_plan(plan)
+
+        assert result.success is False
+        notes_after = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+        assert len(notes_after) == len(notes_before)
+
+    # -- 3. Manifest write failure --
+
+    def test_manifest_write_failure_removes_stale_artifacts(
+        self, tmp_path: Path
+    ):
+        """Previous successful run creates adapter-owned manifest/index.
+        Failed rerun due to manifest write failure removes them."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class ManifestFailsPath(Path):
+            def write_text(self, *a, **k):
+                if MANIFEST_FILENAME in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", ManifestFailsPath, create=False
+        ):
+            result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert any("Failed to write manifest" in e for e in result.errors)
+        self._assert_artifacts_cleaned(vault_dir)
+
+    def test_manifest_write_failure_notes_survive(self, tmp_path: Path):
+        """Copied note files remain after manifest write failure cleanup."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+        notes_before = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class ManifestFailsPath(Path):
+            def write_text(self, *a, **k):
+                if MANIFEST_FILENAME in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", ManifestFailsPath, create=False
+        ):
+            result = apply_vault_plan(plan)
+
+        assert result.success is False
+        notes_after = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+        assert len(notes_after) == len(notes_before)
+
+    # -- Safety: user-authored and non-adapter files survive all failures --
+
+    def test_user_index_survives_index_failure(self, tmp_path: Path):
+        """User-authored Home.md without marker survives index failure cleanup."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+
+        # Replace Home.md with user-authored content (no marker)
+        (vault_dir / INDEX_SUBDIR / "Home.md").write_text(
+            "# My Custom Home\n\nUser written.\n"
+        )
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class IndexFailsPath(Path):
+            def write_text(self, *a, **k):
+                if "Index" in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", IndexFailsPath, create=False
+        ):
+            apply_vault_plan(plan)
+
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert "My Custom Home" in (
+            vault_dir / INDEX_SUBDIR / "Home.md"
+        ).read_text()
+
+    def test_non_adapter_manifest_survives_manifest_failure(
+        self, tmp_path: Path
+    ):
+        """Non-adapter manifest survives manifest failure cleanup."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+
+        (vault_dir / MANIFEST_FILENAME).write_text(
+            '{"version": "custom-v1", "notes": []}'
+        )
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class ManifestFailsPath(Path):
+            def write_text(self, *a, **k):
+                if MANIFEST_FILENAME in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", ManifestFailsPath, create=False
+        ):
+            result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        data = json.loads(
+            (vault_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert data["version"] == "custom-v1"
+
+    def test_malformed_manifest_survives_manifest_failure(self, tmp_path: Path):
+        """Malformed manifest survives manifest failure cleanup."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+
+        (vault_dir / MANIFEST_FILENAME).write_text("{ invalid json }")
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class ManifestFailsPath(Path):
+            def write_text(self, *a, **k):
+                if MANIFEST_FILENAME in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", ManifestFailsPath, create=False
+        ):
+            result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+
+    # -- No duplicate cleanup --
+
+    def test_no_duplicate_cleanup_when_index_and_manifest_both_fail(
+        self, tmp_path: Path
+    ):
+        """When both index and manifest writes fail, cleanup runs once."""
+        wiki_dir, vault_dir = self._setup_first_run(tmp_path)
+
+        config = VaultAdapterConfig(allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+        cleanup_call_count = [0]
+
+        from tracevault.wiki.vault.adapter import (
+            _cleanup_stale_generated_outputs,
+        )
+
+        def side_effect_cleanup(p, r):
+            cleanup_call_count[0] += 1
+            return _cleanup_stale_generated_outputs(p, r)
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class AllWritesFailPath(Path):
+            def write_text(self, *a, **k):
+                if "TraceVault" in str(self) or MANIFEST_FILENAME in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", AllWritesFailPath, create=False
+        ):
+            with unittest.mock.patch(
+                "tracevault.wiki.vault.adapter._cleanup_stale_generated_outputs",
+                side_effect=side_effect_cleanup,
+            ):
+                result = apply_vault_plan(plan)
+
+        assert result.success is False
+        assert cleanup_call_count[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# 28. Pre-write reserved target ownership validation (PR #13 Codex finding)
+# ---------------------------------------------------------------------------
+
+class TestPreWriteReservedTargetOwnership:
+    """Pre-write validation must prevent overwriting user-authored reserved
+    index and manifest files before any filesystem modification occurs.
+
+    The bug: adapter writes Home.md (with marker), then manifest write fails,
+    then cleanup sees the marker and deletes the (now overwritten) file.
+
+    The fix: check ownership before writing, fail the run if reserved targets
+    are user-authored, and never overwrite them in the first place.
+    """
+
+    def _make_wiki_with_notes(self, tmp_path: Path):
+        """Create a wiki directory with valid source notes."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+        return wiki_dir, vault_dir
+
+    # --- Test 1: user-authored Home.md without marker ---
+
+    def test_user_authored_home_md_not_overwritten(self, tmp_path: Path):
+        """Run adaptation with user-authored Home.md — must fail before
+        overwriting, Home.md content remains unchanged."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        # Create user-authored Home.md (no marker)
+        (vault_dir / INDEX_SUBDIR / "Home.md").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        original = "# My Custom Home\n\nUser written content.\n"
+        (vault_dir / INDEX_SUBDIR / "Home.md").write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is False
+        assert any("user-authored" in e for e in result.errors)
+        # Home.md must remain unchanged
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").read_text() == original
+        # No manifest written
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+
+    # --- Test 2: user-authored By-Type.md and By-Source.md ---
+
+    def test_user_authored_by_type_not_overwritten(self, tmp_path: Path):
+        """User-authored By-Type.md must not be overwritten or deleted."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        (vault_dir / INDEX_SUBDIR / "By-Type.md").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        original = "# My Type Index\n\nCustom grouping.\n"
+        (vault_dir / INDEX_SUBDIR / "By-Type.md").write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is False
+        assert (vault_dir / INDEX_SUBDIR / "By-Type.md").read_text() == original
+
+    def test_user_authored_by_source_not_overwritten(self, tmp_path: Path):
+        """User-authored By-Source.md must not be overwritten or deleted."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        (vault_dir / INDEX_SUBDIR / "By-Source.md").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        original = "# My Source Index\n\nMy sources.\n"
+        (vault_dir / INDEX_SUBDIR / "By-Source.md").write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is False
+        assert (vault_dir / INDEX_SUBDIR / "By-Source.md").read_text() == original
+
+    # --- Test 3: non-adapter manifest ---
+
+    def test_non_adapter_manifest_not_overwritten(self, tmp_path: Path):
+        """Existing non-adapter manifest must not be overwritten or deleted."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        original = '{"version": "custom-v1", "notes": []}'
+        vault_dir.mkdir(exist_ok=True)
+        (vault_dir / MANIFEST_FILENAME).write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is False
+        assert any(
+            "not owned by the adapter" in e for e in result.errors
+        )
+        # Manifest content must remain unchanged
+        assert (vault_dir / MANIFEST_FILENAME).read_text() == original
+
+    # --- Test 4: malformed manifest ---
+
+    def test_malformed_manifest_not_overwritten(self, tmp_path: Path):
+        """Existing malformed manifest must not be overwritten or deleted."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        original = "{ invalid json content }"
+        vault_dir.mkdir(exist_ok=True)
+        (vault_dir / MANIFEST_FILENAME).write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is False
+        assert any("unreadable" in e for e in result.errors)
+        assert (vault_dir / MANIFEST_FILENAME).read_text() == original
+
+    # --- Test 5: adapter-generated index/manifest — successful rerun ---
+
+    def test_adapter_generated_index_overwritten_on_rerun(self, tmp_path: Path):
+        """Rerun should overwrite adapter-owned index files successfully."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        # First run: success
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+        assert result1.success is True
+
+        # Second run: should succeed (overwrite adapter-owned files)
+        config2 = VaultAdapterConfig(allow_unhealthy=True, allow_overwrite=True)
+        result2 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config2)
+
+        assert result2.success is True
+        assert result2.index_notes_written == 3
+        # Index files still exist and have marker
+        for filename in ("Home.md", "By-Type.md", "By-Source.md"):
+            content = (vault_dir / INDEX_SUBDIR / filename).read_text(
+                encoding="utf-8"
+            )
+            assert "<!-- tracevault-generated: vault-index -->" in content
+
+    def test_adapter_generated_manifest_overwritten_on_rerun(
+        self, tmp_path: Path
+    ):
+        """Rerun should overwrite adapter-owned manifest successfully."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+        assert result1.success is True
+
+        config2 = VaultAdapterConfig(allow_unhealthy=True, allow_overwrite=True)
+        result2 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config2)
+
+        assert result2.success is True
+        assert result2.manifest_written is True
+
+    # --- Test 6: manifest write failure after index generation ---
+
+    def test_manifest_failure_does_not_delete_user_authored_index(
+        self, tmp_path: Path
+    ):
+        """If manifest write fails after index generation, user-authored
+        pre-existing index files must remain unchanged."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        # Pre-create adapter-owned index files from a first run
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+        assert result1.success is True
+
+        # Now replace Home.md with user-authored content (no marker)
+        user_content = "# My Custom Home\n\nUser written.\n"
+        (vault_dir / INDEX_SUBDIR / "Home.md").write_text(user_content)
+
+        # Second run: manifest write fails.
+        # Pre-write validation should catch user-authored Home.md BEFORE
+        # overwriting it, so it remains intact.
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class ManifestFailsPath(Path):
+            def write_text(self, *a, **k):
+                if MANIFEST_FILENAME in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        config2 = VaultAdapterConfig(allow_unhealthy=True, allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", ManifestFailsPath, create=False
+        ):
+            result2 = apply_vault_plan(plan)
+
+        # The pre-write validation should have caught the user-authored
+        # Home.md and blocked the run before overwriting it.
+        assert result2.success is False
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert (
+            vault_dir / INDEX_SUBDIR / "Home.md"
+        ).read_text() == user_content
+
+    def test_manifest_failure_adapter_index_cleaned_up(
+        self, tmp_path: Path
+    ):
+        """If manifest write fails after index generation, adapter-owned
+        index files (newly created or pre-existing) may be cleaned up."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config)
+
+        import unittest.mock
+
+        import tracevault.wiki.vault.adapter as adapter_mod
+
+        class ManifestFailsPath(Path):
+            def write_text(self, *a, **k):
+                if MANIFEST_FILENAME in str(self):
+                    raise OSError(28, "No space left on device", str(self))
+                return super().write_text(*a, **k)
+
+        with unittest.mock.patch.object(
+            adapter_mod, "Path", ManifestFailsPath, create=False
+        ):
+            result = apply_vault_plan(plan)
+
+        assert result.success is False
+        # Index files are adapter-owned (newly created), so cleanup removes them
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+    # --- Test 7: existing cleanup tests still pass ---
+
+    def test_existing_marker_based_cleanup_preserved(self, tmp_path: Path):
+        """Marker-based cleanup still removes adapter-owned files on failure."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        # First run: success
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+        assert result1.success is True
+
+        # Second run: copy failure
+        config2 = VaultAdapterConfig(allow_unhealthy=True, allow_overwrite=True)
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+
+        import unittest.mock
+        original_copy2 = __import__("shutil").copy2
+        call_count = [0]
+
+        def side_effect_copy2(src, dst):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                original_copy2(src, dst)
+            else:
+                raise OSError(2, "Permission denied", dst)
+
+        with unittest.mock.patch(
+            "tracevault.wiki.vault.adapter.shutil.copy2",
+            side_effect=side_effect_copy2,
+        ):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        # Adapter-owned artifacts cleaned up
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        # Copied notes survive
+        notes = list((vault_dir / NOTES_SUBDIR).glob("*.md"))
+        assert len(notes) >= 1
+
+    # --- Test 8: existing successful path tests still pass ---
+
+    def test_successful_path_unchanged(self, tmp_path: Path):
+        """Happy path: all copies succeed → manifest and indexes written."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is True
+        assert result.notes_copied == 2
+        assert result.manifest_written is True
+        assert result.index_notes_written == 3
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+
+    # --- Test 9: multiple user-authored reserved paths produce multiple errors ---
+
+    def test_multiple_user_authored_paths_reported(self, tmp_path: Path):
+        """When multiple reserved paths are user-authored, all are reported."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        # Pre-create all three index files as user-authored
+        (vault_dir / INDEX_SUBDIR / "Home.md").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        (vault_dir / INDEX_SUBDIR / "Home.md").write_text("# User Home\n")
+        (vault_dir / INDEX_SUBDIR / "By-Type.md").write_text("# User Types\n")
+        # Also a non-adapter manifest
+        (vault_dir / MANIFEST_FILENAME).write_text(
+            '{"version": "custom-v1"}'
+        )
+
+        config = VaultAdapterConfig(allow_unhealthy=True)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is False
+        # Should have errors for Home.md, By-Type.md, and manifest
+        assert len(result.errors) == 3
+        # Nothing was written (pre-write validation blocked the run)
+        assert "<!-- tracevault-generated: vault-index -->" not in (
+            vault_dir / INDEX_SUBDIR / "Home.md"
+        ).read_text()
+
+
+# ---------------------------------------------------------------------------
+# 29. generate_index=False pre-write validation (PR #13 Codex finding)
+# ---------------------------------------------------------------------------
+
+class TestGenerateIndexFalseValidation:
+    """Pre-write validation for index files must be gated by
+    config.generate_index.  When generate_index=False, the adapter
+    must not block on user-authored index files because it won't
+    write them.  Manifest validation must always run."""
+
+    def _make_wiki_with_notes(self, tmp_path: Path):
+        """Create a wiki directory with valid source notes."""
+        wiki_dir = tmp_path / "wiki"
+        vault_dir = tmp_path / "vault"
+        wiki_dir.mkdir()
+        _write_validated_note_to_wiki(wiki_dir, title="A", note_id="n_a")
+        _write_validated_note_to_wiki(wiki_dir, title="B", note_id="n_b")
+        return wiki_dir, vault_dir
+
+    # --- Test 1: user-authored Index/Home.md with generate_index=False ---
+
+    def test_generate_index_false_allows_user_home_md(self, tmp_path: Path):
+        """generate_index=False with user-authored Home.md:
+        apply succeeds, Home.md unchanged, notes copied, manifest written."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        # Create user-authored Home.md (no marker)
+        (vault_dir / INDEX_SUBDIR / "Home.md").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        original = "# My Custom Home\n\nUser written content.\n"
+        (vault_dir / INDEX_SUBDIR / "Home.md").write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is True
+        assert result.notes_copied == 2
+        assert result.index_notes_written == 0
+        assert result.manifest_written is True
+        # Home.md must remain unchanged
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").read_text() == original
+        # No Index dir created by adapter (user pre-created it)
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+
+    # --- Test 2: user-authored By-Type.md and By-Source.md ---
+
+    def test_generate_index_false_allows_user_by_type(self, tmp_path: Path):
+        """generate_index=False with user-authored By-Type.md:
+        apply succeeds, file remains unchanged."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        (vault_dir / INDEX_SUBDIR / "By-Type.md").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        original = "# My Type Index\n\nCustom grouping.\n"
+        (vault_dir / INDEX_SUBDIR / "By-Type.md").write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is True
+        assert (vault_dir / INDEX_SUBDIR / "By-Type.md").read_text() == original
+
+    def test_generate_index_false_allows_user_by_source(self, tmp_path: Path):
+        """generate_index=False with user-authored By-Source.md:
+        apply succeeds, file remains unchanged."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        (vault_dir / INDEX_SUBDIR / "By-Source.md").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        original = "# My Source Index\n\nMy sources.\n"
+        (vault_dir / INDEX_SUBDIR / "By-Source.md").write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is True
+        assert (vault_dir / INDEX_SUBDIR / "By-Source.md").read_text() == original
+
+    # --- Test 3: non-adapter manifest with generate_index=False ---
+
+    def test_generate_index_false_non_adapter_manifest_blocks(self, tmp_path):
+        """generate_index=False with non-adapter manifest:
+        apply fails before overwrite, manifest unchanged."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        original = '{"version": "custom-v1", "notes": []}'
+        vault_dir.mkdir(exist_ok=True)
+        (vault_dir / MANIFEST_FILENAME).write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is False
+        assert any("not owned by the adapter" in e for e in result.errors)
+        assert (vault_dir / MANIFEST_FILENAME).read_text() == original
+        # Notes should not have been copied
+        assert result.notes_copied == 0
+
+    # --- Test 4: malformed manifest with generate_index=False ---
+
+    def test_generate_index_false_malformed_manifest_blocks(self, tmp_path):
+        """generate_index=False with malformed manifest:
+        apply fails before overwrite, manifest unchanged."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        original = "{ invalid json content }"
+        vault_dir.mkdir(exist_ok=True)
+        (vault_dir / MANIFEST_FILENAME).write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=False)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is False
+        assert any("unreadable" in e for e in result.errors)
+        assert (vault_dir / MANIFEST_FILENAME).read_text() == original
+        assert result.notes_copied == 0
+
+    # --- Test 5: generate_index=True still blocks user-authored index ---
+
+    def test_generate_index_true_still_blocks_user_home_md(self, tmp_path):
+        """generate_index=True with user-authored Home.md:
+        still fails before overwrite, file remains unchanged."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        (vault_dir / INDEX_SUBDIR / "Home.md").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        original = "# My Custom Home\n\nUser written content.\n"
+        (vault_dir / INDEX_SUBDIR / "Home.md").write_text(original)
+
+        config = VaultAdapterConfig(allow_unhealthy=True, generate_index=True)
+        result = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config)
+
+        assert result.success is False
+        assert any("user-authored" in e for e in result.errors)
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").read_text() == original
+
+    # --- Test 6: stale cleanup after failed rerun with generate_index=False ---
+
+    def test_generate_index_false_cleanup_stale_indexes_from_prev_run(
+        self, tmp_path
+    ):
+        """Failed rerun with generate_index=False after previous
+        successful generate_index=True run:
+        stale adapter-generated index files are still cleaned up."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        # First run: success with index
+        config1 = VaultAdapterConfig(allow_unhealthy=True, generate_index=True)
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config1)
+        assert result1.success is True
+        assert result1.index_notes_written == 3
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert (vault_dir / MANIFEST_FILENAME).exists()
+
+        # Second run: generate_index=False, copy fails
+        config2 = VaultAdapterConfig(
+            allow_unhealthy=True, generate_index=False, allow_overwrite=True
+        )
+        plan = build_vault_plan(wiki_dir, vault_dir, config=config2)
+
+        import shutil as real_shutil
+        import unittest.mock
+        call_count = [0]
+
+        def side_effect_copy2(src, dst):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                real_shutil.copy2(src, dst)
+            else:
+                raise OSError(2, "Permission denied", dst)
+
+        with unittest.mock.patch(
+            "tracevault.wiki.vault.adapter.shutil.copy2",
+            side_effect=side_effect_copy2,
+        ):
+            result2 = apply_vault_plan(plan)
+
+        assert result2.success is False
+        # Stale adapter-owned index files cleaned up despite generate_index=False
+        assert not (vault_dir / INDEX_SUBDIR / "Home.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Type.md").exists()
+        assert not (vault_dir / INDEX_SUBDIR / "By-Source.md").exists()
+        # Stale adapter-owned manifest cleaned up
+        assert not (vault_dir / MANIFEST_FILENAME).exists()
+
+    # --- Test: generate_index=False + adapter manifest + user index = success ---
+
+    def test_generate_index_false_adapter_manifest_user_index_ok(
+        self, tmp_path
+    ):
+        """generate_index=False with adapter-owned manifest AND
+        user-authored index files: apply succeeds, index files untouched."""
+        wiki_dir, vault_dir = self._make_wiki_with_notes(tmp_path)
+
+        # First run: create adapter-owned manifest
+        config1 = VaultAdapterConfig(allow_unhealthy=True, generate_index=True)
+        result1 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config1)
+        assert result1.success is True
+
+        # Replace Home.md with user content (remove marker)
+        user_content = "# My Home\n\nUser written.\n"
+        (vault_dir / INDEX_SUBDIR / "Home.md").write_text(user_content)
+
+        # Second run with generate_index=False should succeed
+        config2 = VaultAdapterConfig(
+            allow_unhealthy=True, generate_index=False, allow_overwrite=True
+        )
+        result2 = adapt_to_obsidian_vault(wiki_dir, vault_dir, config=config2)
+
+        assert result2.success is True
+        assert result2.notes_copied == 2
+        assert result2.index_notes_written == 0
+        assert result2.manifest_written is True
+        # User Home.md untouched
+        assert (vault_dir / INDEX_SUBDIR / "Home.md").read_text() == user_content

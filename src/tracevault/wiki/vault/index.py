@@ -71,6 +71,7 @@ def render_home_index(note_plans: list[VaultNotePlan]) -> str:
         lines.append(f"- [[{link_path}|{title}]]")
 
     lines.append("")
+    lines.append("<!-- tracevault-generated: vault-index -->")
     return "\n".join(lines)
 
 
@@ -106,6 +107,7 @@ def render_by_type_index(note_plans: list[VaultNotePlan]) -> str:
             lines.append(f"- [[{link_path}|{title}]]")
         lines.append("")
 
+    lines.append("<!-- tracevault-generated: vault-index -->")
     return "\n".join(lines)
 
 
@@ -141,6 +143,7 @@ def render_by_source_index(note_plans: list[VaultNotePlan]) -> str:
             lines.append(f"- [[{link_path}|{title}]]")
         lines.append("")
 
+    lines.append("<!-- tracevault-generated: vault-index -->")
     return "\n".join(lines)
 
 

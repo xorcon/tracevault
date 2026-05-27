@@ -8,6 +8,7 @@ Public API:
 - adapt_to_obsidian_vault() — convenience one-liner (plan + apply)
 """
 
+import json
 import shutil
 from pathlib import Path
 
@@ -38,20 +39,15 @@ def _collect_wiki_md_files(
 ) -> list[Path]:
     """Collect .md files recursively, sorted for determinism.
 
-    Skips hidden directories (starting with . or _) and any directory
-    named TraceVault (generated vault output).
-
-    Also skips any path that falls under a resolved exclude directory
-    (e.g., vault_dir when it is nested inside wiki_dir).
+    Skips hidden directories (starting with . or _) and any path
+    that falls under a resolved exclude directory (e.g., vault_dir
+    when it is nested inside wiki_dir).
     """
     exclude_dirs = exclude_dirs or []
     files: list[Path] = []
     for child in sorted(wiki_dir.iterdir()):
         if child.is_dir():
             if child.name.startswith((".", "_")):
-                continue
-            # Skip generated TraceVault output directories
-            if child.name == "TraceVault":
                 continue
             # Skip any candidate under an excluded directory
             try:
@@ -309,6 +305,184 @@ def build_vault_plan(
     return plan
 
 
+def _is_generated_index_file(path: Path) -> bool:
+    """Return True if *path* contains the adapter-generated-index marker."""
+    try:
+        return "<!-- tracevault-generated: vault-index -->" in path.read_text(
+            encoding="utf-8"
+        )
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def _is_adapter_manifest(path: Path) -> bool:
+    """Return True if *path* is a JSON manifest with the adapter ownership field."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return data.get("generated_by") == "tracevault-vault-adapter"
+
+
+def _cleanup_stale_generated_outputs(
+    plan: VaultAdaptationPlan,
+    result: VaultAdaptationResult,
+) -> None:
+    """Remove adapter-owned generated artifacts from a previous run.
+
+    Only removes files that are positively identified as adapter-generated
+    (via content markers).  Does not touch copied note files under
+    TraceVault/Notes, user-authored files, or the vault directory tree.
+    """
+    vault_dir = Path(plan.vault_dir)
+
+    # Always inspect reserved index paths regardless of current config —
+    # a previous run may have written them with generate_index=True.
+    index_dir = resolve_index_dir(vault_dir)
+    index_files = [
+        index_dir / "Home.md",
+        index_dir / "By-Type.md",
+        index_dir / "By-Source.md",
+    ]
+
+    for path in index_files:
+        if not path.is_file():
+            continue
+        try:
+            if _is_generated_index_file(path):
+                path.unlink()
+        except OSError as exc:
+            result.errors.append(
+                f"Failed to remove stale artifact {path.name}: {exc}"
+            )
+
+    # Manifest: remove only if adapter-owned
+    manifest_path = resolve_manifest_path(vault_dir)
+    if manifest_path.is_file():
+        try:
+            if _is_adapter_manifest(manifest_path):
+                manifest_path.unlink()
+        except OSError as exc:
+            result.errors.append(
+                f"Failed to remove stale artifact {manifest_path.name}: {exc}"
+            )
+
+
+def _fail_with_cleanup(
+    plan: VaultAdaptationPlan,
+    result: VaultAdaptationResult,
+    reason: str,
+) -> VaultAdaptationResult:
+    """Record a validation error, remove stale artifacts, and return failure."""
+    result.errors.append(reason)
+    _cleanup_stale_generated_outputs(plan, result)
+    return result
+
+
+def _validate_index_targets(
+    plan: VaultAdaptationPlan,
+    result: VaultAdaptationResult,
+) -> bool:
+    """Validate ownership of reserved index file targets before overwriting.
+
+    Only runs when config.generate_index=True, because the adapter must not
+    block on user-authored index files when this run will not write them.
+
+    Returns True if all index targets are safe (or not being written).
+    On failure, records errors and returns False.
+    """
+    config = plan.config or VaultAdapterConfig()
+    if not config.generate_index:
+        return True
+
+    vault_dir = Path(plan.vault_dir)
+    index_dir = resolve_index_dir(vault_dir)
+    index_files = [
+        index_dir / "Home.md",
+        index_dir / "By-Type.md",
+        index_dir / "By-Source.md",
+    ]
+
+    for path in index_files:
+        if not path.is_file():
+            continue
+        if not _is_generated_index_file(path):
+            result.errors.append(
+                f"Reserved path '{path.relative_to(vault_dir)}' is "
+                "user-authored and cannot be overwritten by the adapter."
+            )
+    return len(result.errors) == 0
+
+
+def _validate_manifest_target(
+    plan: VaultAdaptationPlan,
+    result: VaultAdaptationResult,
+) -> bool:
+    """Validate ownership of the manifest target before overwriting.
+
+    Always runs because the manifest is written on every successful apply.
+
+    Returns True if the manifest target is safe (or doesn't exist).
+    On failure, records errors and returns False.
+    """
+    vault_dir = Path(plan.vault_dir)
+    manifest_path = resolve_manifest_path(vault_dir)
+    if not manifest_path.is_file():
+        return True
+
+    try:
+        manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        result.errors.append(
+            f"Reserved path '{manifest_path.relative_to(vault_dir)}' is "
+            "unreadable and cannot be overwritten by the adapter."
+        )
+        return False
+    else:
+        is_owned = (
+            isinstance(manifest_data, dict)
+            and manifest_data.get("generated_by")
+            == "tracevault-vault-adapter"
+        )
+        if not is_owned:
+            result.errors.append(
+                f"Reserved path '{manifest_path.relative_to(vault_dir)}' is "
+                "not owned by the adapter and cannot be overwritten."
+            )
+            return False
+    return True
+
+
+def _validate_reserved_targets(
+    plan: VaultAdaptationPlan,
+    result: VaultAdaptationResult,
+) -> bool:
+    """Validate ownership of reserved generated targets before overwriting.
+
+    Before the adapter overwrites reserved paths, it must confirm they are
+    not user-authored.  This prevents the following scenario:
+
+      1. Run overwrites a user-authored Home.md with adapter content + marker.
+      2. Manifest write fails; cleanup runs.
+      3. Cleanup sees the marker and deletes the (now overwritten) file.
+
+    Index-file validation runs only when config.generate_index=True.
+    Manifest validation always runs because the manifest is written every run.
+
+    Returns True if all targets are safe to write.  On failure, records
+    errors, runs cleanup for stale adapter-owned artifacts, and returns
+    False.
+    """
+    index_ok = _validate_index_targets(plan, result)
+    manifest_ok = _validate_manifest_target(plan, result)
+
+    if not (index_ok and manifest_ok):
+        _cleanup_stale_generated_outputs(plan, result)
+        return False
+
+    return True
+
+
 def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
     """Apply a vault adaptation plan to the filesystem.
 
@@ -330,20 +504,20 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
 
     # (a) Validate health_passed
     if not plan.health_passed:
-        result.errors.append(
+        return _fail_with_cleanup(
+            plan, result,
             f"Health preflight failed with {plan.health_errors} error(s). "
-            "Refusing to write any files."
+            "Refusing to write any files.",
         )
-        return result
 
     # (b) Validate no rejected note plans
     if plan.rejected_notes:
         result.notes_rejected = len(plan.rejected_notes)
-        result.errors.append(
+        return _fail_with_cleanup(
+            plan, result,
             f"{len(plan.rejected_notes)} note(s) rejected by plan. "
-            "Refusing to write any files."
+            "Refusing to write any files.",
         )
-        return result
 
     # (c) Validate no duplicate destination paths (defensive, case-insensitive)
     dest_check: dict[str, str] = {}
@@ -352,11 +526,11 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
             continue
         dest_key = canonical_destination_key(Path(note_plan.destination_path))
         if dest_key in dest_check:
-            result.errors.append(
+            return _fail_with_cleanup(
+                plan, result,
                 f"Duplicate destination '{note_plan.destination_path}' (claimed by "
-                f"'{dest_check[dest_key]}' and '{note_plan.relative_source}')"
+                f"'{dest_check[dest_key]}' and '{note_plan.relative_source}')",
             )
-            return result
         dest_check[dest_key] = note_plan.relative_source
 
     # (d) Validate source files are readable
@@ -364,10 +538,10 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
         if note_plan.rejected or note_plan.skipped:
             continue
         if not Path(note_plan.source_path).is_file():
-            result.errors.append(
-                f"Source file not found: {note_plan.source_path}"
+            return _fail_with_cleanup(
+                plan, result,
+                f"Source file not found: {note_plan.source_path}",
             )
-            return result
 
     # (e) Validate parent paths can be created (dry-run)
     parents_to_check: set[Path] = set()
@@ -380,8 +554,14 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
         while not p.exists() and p != p.parent:
             p = p.parent
         if not p.exists() or not p.is_dir():
-            result.errors.append(f"Cannot create parent path: {parent}")
-            return result
+            return _fail_with_cleanup(
+                plan, result,
+                f"Cannot create parent path: {parent}",
+            )
+
+    # (f) Validate reserved generated targets ownership
+    if not _validate_reserved_targets(plan, result):
+        return result
 
     # === Write phase (only reached if all validation passes) ===
 
@@ -392,6 +572,7 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
             resolve_index_dir(vault_dir).mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         result.errors.append(f"Failed to create vault directories: {exc}")
+        _cleanup_stale_generated_outputs(plan, result)
         return result
 
     # --- Copy notes (byte-preserving) ---
@@ -414,6 +595,11 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
             result.errors.append(
                 f"Failed to copy {note_plan.relative_source}: {exc}"
             )
+
+    # --- Fail-closed: clean up stale artifacts from previous runs ---
+    if result.errors:
+        _cleanup_stale_generated_outputs(plan, result)
+        return result
 
     # --- Generate index notes ---
     if config.generate_index:
@@ -440,6 +626,11 @@ def apply_vault_plan(plan: VaultAdaptationPlan) -> VaultAdaptationResult:
         result.manifest_written = True
     except OSError as exc:
         result.errors.append(f"Failed to write manifest: {exc}")
+
+    # --- Fail-closed: clean up stale artifacts if any write failed ---
+    if result.errors:
+        _cleanup_stale_generated_outputs(plan, result)
+        return result
 
     return result
 

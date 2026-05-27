@@ -29,6 +29,7 @@ def build_vault_manifest(
 
     return {
         "version": VAULT_MANIFEST_VERSION,
+        "generated_by": "tracevault-vault-adapter",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_wiki_dir": wiki_dir,
         "vault_dir": vault_dir,
