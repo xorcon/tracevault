@@ -29,25 +29,37 @@ TraceVault currently includes implemented foundations for:
 - evidence pack and grounded context assembly
 - evidence-backed Markdown wiki export
 - wiki health / lint / drift checking
+- optional Obsidian-friendly vault adaptation
 
-The next planned phase is:
+Phase 6C is complete and hardened through follow-up review.
 
 ```text
-Phase 6C — Optional Obsidian Vault Adapter
+Phase 6C — Optional Obsidian-Friendly Vault Adapter: complete
+Primary PR: #11
+Follow-up PR: #13
+Final merge commit: 1269b805a184b6a61680a90bd7915af89ae02a8d
+Worklog: docs/worklogs/TraceVault_Phase_6C_Worklog.md
 ```
+
+Near-term focus is repository stabilization, agent guidance alignment, and cleanup of non-blocking tooling warnings before the next major feature phase.
 
 ---
 
 ## System Architecture
 
 ```text
-┌──────────────────────────────────────────────┐
-│        Compiled Knowledge Wiki Layer         │
-│  Evidence-backed export + health validation  │
-└──────────────────────┬───────────────────────┘
-                       ↑
-              Evidence-backed artifacts
-                       ↑
+┌────────────────────────────────────────────────────┐
+│          Optional Vault Adapter Layer              │
+│  Obsidian-friendly organization, no dependency     │
+└──────────────────────────▲─────────────────────────┘
+                           │
+┌──────────────────────────┴─────────────────────────┐
+│          Compiled Knowledge Wiki Layer             │
+│  Evidence-backed export + health validation        │
+└──────────────────────────▲─────────────────────────┘
+                           │
+                  Evidence-backed artifacts
+                           │
 ┌────────────┐    ┌──────────────┐    ┌──────────────┐
 │ Raw Source │ →  │ Refinement   │ →  │ Retrieval    │
 │ (truth)    │    │ (cleaned)    │    │ (hybrid)     │
@@ -63,7 +75,7 @@ Phase 6 is split into:
 ```text
 Phase 6A — Evidence-backed Wiki Export
 Phase 6B — Wiki Health / Lint / Drift Check
-Phase 6C — Optional Obsidian Vault Adapter
+Phase 6C — Optional Obsidian-Friendly Vault Adapter
 ```
 
 ---
@@ -78,12 +90,13 @@ cleaned_text  = processing layer
 retrieval     = candidate selection layer
 evidence_pack = bounded grounded context
 wiki_note     = human-readable derived artifact, not truth
+vault_copy    = organized copy of a wiki note, not truth
 ```
 
 Conflict resolution:
 
 ```text
-raw_text > evidence_pack > derived_answer > compiled_wiki_note
+raw_text > evidence_pack > derived_answer > compiled_wiki_note > vault_copy
 ```
 
 ### 2. Dual Context Architecture
@@ -126,6 +139,21 @@ Phase 6B validates wiki artifacts for:
 - claim-to-evidence citation mapping
 - evidence reference identity
 - source hash drift when an explicit manifest is provided
+
+### 6. Filesystem-Safe Adapter Boundary
+
+The vault adapter is organization-only. It must not become a source of truth or an Obsidian runtime integration.
+
+Phase 6C enforces:
+
+- Phase 6B health preflight before adaptation
+- path-scoped `vault_dir` exclusion only
+- byte-preserving note copy via `shutil.copy2`
+- case-insensitive destination collision protection
+- marker/ownership-based generated artifact cleanup
+- pre-write reserved-path ownership validation
+- preservation of `generate_index=False` semantics
+- no `.obsidian/`, plugin, sync, publishing, LLM, or claim/evidence rewriting behavior
 
 ---
 
@@ -215,12 +243,19 @@ Phase 6B validates wiki artifacts for:
 - structured JSON health reports
 - fail-closed malformed note / manifest handling
 
-#### Phase 6C — Optional Obsidian Vault Adapter
+#### Phase 6C — Optional Obsidian-Friendly Vault Adapter
 
-- Obsidian-compatible Markdown organization
-- no Obsidian runtime dependency in core TraceVault
-- TraceVault metadata preserved
-- wiki health checks should act as preflight validation before vault sync
+- optional vault adapter under `src/tracevault/wiki/vault/`
+- plan-first adaptation
+- health preflight via Phase 6B
+- byte-preserving Markdown copy
+- deterministic vault layout
+- metadata-only index generation
+- deterministic vault manifest
+- case-insensitive collision detection
+- marker/ownership-based stale generated artifact cleanup
+- reserved-path pre-write validation
+- no Obsidian dependency, plugin, `.obsidian/`, sync, publishing, or LLM behavior
 
 ---
 
@@ -250,6 +285,24 @@ python3 -m tracevault wiki-health <path> --source-manifest <manifest.json>
 
 The wiki health checker validates frontmatter, evidence references, citation resolution, duplicate note identity, malformed notes, and source hash drift when an explicit manifest is provided.
 
+### Plan an Obsidian-friendly vault adaptation
+
+```bash
+python3 -m tracevault wiki-vault-plan <exported-wiki-dir> --vault-dir <vault-dir>
+python3 -m tracevault wiki-vault-plan <exported-wiki-dir> --vault-dir <vault-dir> --json
+```
+
+The plan command runs health preflight and writes nothing.
+
+### Apply an Obsidian-friendly vault adaptation
+
+```bash
+python3 -m tracevault wiki-vault-adapt <exported-wiki-dir> <vault-dir>
+python3 -m tracevault wiki-vault-adapt <exported-wiki-dir> <vault-dir> --json
+```
+
+The adapt command copies healthy exported notes into a deterministic vault structure and may generate metadata-only indexes and a manifest. It fails closed on health errors, destination collisions, unsafe reserved paths, and write failures.
+
 ---
 
 ## Implementation Status
@@ -264,8 +317,30 @@ Phase 4.1 — Retrieval Contract Hardening               complete
 Phase 5   — Evidence Pack & Grounded Context Assembly  complete
 Phase 6A  — Evidence-backed Wiki Export                complete
 Phase 6B  — Wiki Health / Lint / Drift Check           complete
-Phase 6C  — Optional Obsidian Vault Adapter            next
+Phase 6C  — Optional Obsidian-Friendly Vault Adapter   complete
 ```
+
+---
+
+## Worklogs
+
+Phase worklogs capture implementation decisions, review loops, merge evidence, and lessons learned.
+
+```text
+docs/worklogs/TraceVault_Phase_6C_Worklog.md
+```
+
+Phase 6C worklog covers:
+
+- adapter-only boundary
+- health preflight design
+- path-scoped exclusion
+- byte-preserving copy
+- collision safety
+- stale manifest/index cleanup
+- marker/ownership semantics
+- `generate_index=False` behavior
+- PR #11 / #13 merge evidence
 
 ---
 
@@ -279,6 +354,7 @@ Phase 6C  — Optional Obsidian Vault Adapter            next
 | Evidence mapping | Weak | Required |
 | Evidence pack assembly | Often implicit | Explicit, inspectable, budget-aware |
 | Wiki artifact validation | Rare | Built-in wiki health / lint / drift check |
+| Vault organization | External/manual | Optional adapter with health preflight and ownership safety |
 | Knowledge persistence | Usually external | Evidence-backed wiki layer |
 | Audit readiness | Low | High |
 
@@ -292,6 +368,7 @@ TraceVault is not:
 chatbot
 vector search demo
 personal note-taking tool
+Obsidian plugin
 ```
 
 TraceVault is:
@@ -309,7 +386,9 @@ Hybrid Cloud + AI Architecture Portfolio Project
 Near-term focus:
 
 ```text
-Phase 6C → Optional Obsidian Vault Adapter
+repository stabilization
+documentation and agent guidance alignment
+non-blocking tooling cleanup, including Ruff config migration
 ```
 
 Future extensions may include:
