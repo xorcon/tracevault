@@ -4,129 +4,283 @@
 
 Build the smallest system that demonstrates enterprise-grade architecture maturity, then expand toward AI platform depth.
 
-## Phase 0 - Repository and Architecture Foundation
+TraceVault's roadmap is intentionally proof-chain first:
 
-Status: Started
+```text
+source preservation
+  -> deterministic processing
+  -> traceable retrieval
+  -> evidence assembly
+  -> derived artifact validation
+  -> optional organization adapters
+  -> later reasoning / validation layers
+```
 
-Deliverables:
+Do not add advanced AI features unless they preserve traceability, local-first operation, and auditability.
 
-- repository initialized
-- project charter
-- architecture overview
-- system design
-- governance model
-- RAG pipeline design
-- security threat model
-- evaluation strategy
-- deployment architecture
-- portfolio case study draft
+---
 
-## Phase 1 - Traceable Grounded RAG MVP
+## Completed Foundation Through Phase 6C
 
-Goal: Build a working evidence-preserving RAG pipeline.
+### Phase 1 — Python Foundation
 
-Deliverables:
+Status: Complete
 
-- document ingestion
-- chunking engine
-- semantic refinement prompt
-- raw/cleaned chunk storage
-- embedding pipeline
-- vector index
-- keyword index
-- hybrid retriever
-- evidence pack builder
-- grounded answer prompt
-- answer with citations
+Delivered:
+
+- Python package baseline
+- CLI foundation
+- environment-based settings
+- test infrastructure
+
+### Phase 2 — Ingestion and Differential Ingest
+
+Status: Complete
+
+Delivered:
+
+- local plaintext ingestion
+- SHA-256 content hashing
+- deterministic document identity
+- manifest-based change detection
+- canonical path normalization
+- corrupted-manifest fail-closed behavior
+
+### Phase 3A — Semantic Refinement Foundation
+
+Status: Complete
+
+Delivered:
+
+- deterministic chunking
+- hard chunk-size boundaries
+- `raw_text` / `cleaned_text` dual-context records
+- rule-based refinement
+- no-new-facts safeguard
+- per-chunk proof metadata
+
+### Phase 3B — Optional Local Model Refinement
+
+Status: Complete
+
+Delivered:
+
+- optional local model adapter
+- deterministic fallback
+- model-output guardrails
+- no-new-facts validation after model refinement
+
+### Phase 4 — Hybrid Retrieval Foundation
+
+Status: Complete
+
+Delivered:
+
+- deterministic in-memory keyword retrieval
+- deterministic vector placeholder
+- metadata filtering
+- text retrieval policy
+- hybrid score merge
+- traceable `RetrievalResult` / `RetrievalTrace`
+- no real vector database or embedding dependency yet
+
+### Phase 4.1 — Retrieval Contract Hardening
+
+Status: Complete
+
+Delivered:
+
+- pipeline-owned default text policy
+- custom keyword retriever compatibility
+- provenance preservation from retrieval candidates
+- execution metadata aligned with response metadata
+
+### Phase 5 — Evidence Pack and Grounded Context Assembly
+
+Status: Complete
+
+Delivered:
+
+- `EvidencePack` request / response models
+- deterministic evidence item selection
+- duplicate and budget exclusion tracking
+- retrieval provenance preservation
+- assembled grounded context
+- no answer generation, reasoning, citation validation, or contradiction detection
+
+### Phase 6A — Evidence-backed Wiki Export
+
+Status: Complete
+
+Delivered:
+
+- Markdown knowledge notes
+- YAML frontmatter
+- claim-to-evidence mapping
+- proposal-first, non-destructive export
+- deterministic filename identity
+- strict proof-chain checks
+
+### Phase 6B — Wiki Health / Lint / Drift Check
+
+Status: Complete
+
+Delivered:
+
+- YAML frontmatter validation
+- `note_id` / `note_type` / `schema_version` / `status` checks
+- `source_policy` and `validation_status` checks
+- `evidence_count` consistency checks
+- claim citation resolution
+- evidence reference `document_id` / `chunk_id` checks
+- duplicate evidence label detection
+- duplicate `note_id` detection across directories
+- orphan / malformed note detection
+- source hash drift checks via explicit manifest
+- structured JSON health reports
+- fail-closed malformed note / manifest handling
+
+### Phase 6C — Optional Obsidian-Friendly Vault Adapter
+
+Status: Complete
+
+Delivered:
+
+- optional vault adapter package under `src/tracevault/wiki/vault/`
+- plan-first adaptation
+- Phase 6B health preflight
+- byte-preserving note copy
+- deterministic vault layout
+- metadata-only index generation
+- deterministic vault manifest
+- case-insensitive collision detection
+- marker/ownership-based stale artifact cleanup
+- reserved-path pre-write validation
+- `generate_index=False` semantics
+- CLI commands for plan/apply
+- synthetic test coverage for repeated-run and failure-path behavior
+
+Merge evidence:
+
+```text
+Primary PR: #11 — feat: add optional obsidian vault adapter
+Follow-up PR: #13 — fix: harden phase 6c vault adapter follow-up behavior
+Final merge commit: 1269b805a184b6a61680a90bd7915af89ae02a8d
+Worklog: docs/worklogs/TraceVault_Phase_6C_Worklog.md
+```
+
+---
+
+## Current Near-Term Focus
+
+The recommended next work is stabilization, not a large new feature.
+
+### Stabilization Workstream
+
+Recommended next items:
+
+1. Keep documentation aligned with Phase 6C completion.
+2. Keep local agent guidance aligned with the Phase 6C worklog.
+3. Migrate deprecated Ruff settings into the current `[tool.ruff.lint]` layout.
+4. Review documentation for stale phase references.
+5. Keep `main` green after each small documentation or tooling update.
 
 Success criteria:
 
-- user can query a small knowledge base
-- answer cites evidence chunks
-- raw source evidence is visible
-- confidence and limitations are shown
+```text
+git status clean
+python3 -m pytest -q passes
+python3 -m ruff check . passes
+python3 -m tracevault diagnose passes
+python3 -m compileall src tests passes
+```
 
-## Phase 2 - Self-Verifying RAG
+---
 
-Goal: Add verification and quality controls.
+## Future Feature Candidates
 
-Deliverables:
+Future work should be selected only after the stabilization workstream is clean.
 
-- citation checker
-- unsupported claim detector
-- conflict detector
-- answer confidence scoring
-- retrieval evaluation set
-- prompt injection warning logic
-- audit event logging
+### Candidate A — Real Vector Index Lifecycle
 
-Success criteria:
+Goal: Replace or supplement the deterministic vector placeholder with a real vector index while preserving explicit provenance.
 
-- unsupported claims are flagged
-- citation quality is measurable
-- evaluation scorecard can be produced
+Required guardrails:
 
-## Phase 3 - Enterprise Knowledge Governance
+- no loss of `document_id` / `chunk_id`
+- index build traceability
+- stale index detection
+- reproducible local fallback
+- no hidden external API dependency for baseline tests
 
-Goal: Add stronger governance patterns.
+### Candidate B — Embedding Integration With Explicit Provenance
 
-Deliverables:
+Goal: Add embedding generation while making model, version, source hash, and embedding timestamp auditable.
 
-- sensitivity tagging
-- source trust score
-- retention metadata
-- document versioning
-- policy-aware answer controls
-- admin review workflow
+Required guardrails:
 
-Success criteria:
+- source raw hash recorded
+- embedding model identity recorded
+- embedding generation deterministic where possible
+- model failure does not corrupt source data
 
-- system can distinguish public/internal/restricted knowledge
-- answer behavior changes based on sensitivity metadata
+### Candidate C — Reasoning Engine Implementation
 
-## Phase 4 - Knowledge Graph Extension
+Goal: Generate answers from evidence packs only.
 
-Goal: Evolve from grounded RAG to graph-assisted reasoning.
+Required guardrails:
 
-Deliverables:
+- answer from evidence pack only
+- no answer from memory
+- unsupported claims flagged
+- citations map to evidence labels
+- contradiction and low-confidence behavior explicit
 
-- entity extraction
-- relationship extraction
-- node/edge schema
-- graph persistence
-- graph-aware retrieval
-- relationship synthesis mode
+### Candidate D — Validation / Verification Engine
 
-Success criteria:
+Goal: Validate generated answers against evidence.
 
-- system can answer relationship questions using explicit entities and edges
+Required guardrails:
 
-## Phase 5 - Hybrid Cloud / AI Platform Deployment
+- claim extraction
+- citation coverage checks
+- unsupported claim detection
+- contradiction detection
+- JSON and human-readable reports
 
-Goal: Demonstrate platform deployment architecture.
+### Candidate E — Portfolio-grade Deployment Packaging
 
-Deliverables:
+Goal: Create a credible local/hybrid deployment path without weakening local-first operation.
 
-- Docker Compose deployment
-- local model deployment path
-- cloud model gateway path
-- PostgreSQL + pgvector deployment
-- observability integration
-- Kubernetes architecture blueprint
-- security and secrets design
+Required guardrails:
 
-Success criteria:
+- no secrets in repo
+- local default deployment
+- documented cloud/hybrid extension path
+- observability and security design
 
-- system can be deployed locally
-- system has a credible path to cloud or hybrid deployment
+---
 
 ## Portfolio Milestones
 
 | Milestone | Portfolio Output |
 |---|---|
 | Architecture docs complete | GitHub repo shows architect thinking |
-| MVP working | Live demo or local walkthrough video |
-| Evaluation scorecard | Evidence of engineering maturity |
-| Security controls | Enterprise AI governance credibility |
+| Ingestion/refinement/retrieval foundation | Local walkthrough of traceable pipeline |
+| Evidence pack and wiki export | Proof of grounded AI artifact generation |
+| Wiki health / vault adapter | Evidence of filesystem safety and governance maturity |
+| Evaluation / verification scorecard | Evidence of engineering maturity |
 | Deployment blueprint | Hybrid cloud architecture credibility |
 | Case study published | Resume / LinkedIn leverage |
+
+---
+
+## Roadmap Rule
+
+Every future phase must preserve this hierarchy:
+
+```text
+raw_text > cleaned_text > retrieval result > evidence pack > wiki note > vault copy > final answer
+```
+
+If a proposed feature weakens this hierarchy, it is out of scope until an ADR explicitly approves the change.
